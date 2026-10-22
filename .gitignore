@@ -1,0 +1,16 @@
+# Python 虛擬環境與快取
+.venv/
+__pycache__/
+*.py[cod]
+
+# 個人筆記與原始規劃文件（只留本機）
+/local-notes/
+/CORE_MILESTONES.md
+/docs/EXTENSIBILITY_BACKLOG.md
+/.codex/
+
+# 本機環境設定與執行產物
+.env
+.env.*
+!.env.example
+*.log

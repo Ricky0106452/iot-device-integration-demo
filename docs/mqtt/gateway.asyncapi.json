@@ -1,0 +1,109 @@
+{
+  "asyncapi": "3.1.0",
+  "info": {
+    "title": "IoT Integration Demo gateway telemetry API",
+    "version": "1.0.0",
+    "description": "Gateway application perspective. Contract only; device telemetry integration is not implemented yet. Normative behavior: CONTRACT.md."
+  },
+  "defaultContentType": "application/json",
+  "servers": {
+    "local": {
+      "host": "127.0.0.1:1883",
+      "protocol": "mqtt",
+      "protocolVersion": "3.1.1",
+      "description": "Local development, anonymous, no TLS, Broker persistence disabled.",
+      "bindings": {
+        "mqtt": {
+          "cleanSession": true,
+          "keepAlive": 30,
+          "bindingVersion": "0.2.0"
+        }
+      }
+    }
+  },
+  "channels": {
+    "deviceTelemetry": {
+      "address": "okgo/demo/v1/devices/{device_id}/telemetry",
+      "parameters": {
+        "device_id": {
+          "description": "Logical device ID: 1..64 lowercase letters/digits, hyphen-separated; e.g. meter-001. Must match payload.device_id."
+        }
+      },
+      "servers": [
+        {
+          "$ref": "#/servers/local"
+        }
+      ],
+      "messages": {
+        "telemetry": {
+          "$ref": "#/components/messages/telemetry"
+        }
+      },
+      "description": "Gateway publishes an exact topic per configured device."
+    }
+  },
+  "operations": {
+    "publishTelemetry": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/deviceTelemetry"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/deviceTelemetry/messages/telemetry"
+        }
+      ],
+      "summary": "Publish a successfully decoded acquisition",
+      "bindings": {
+        "mqtt": {
+          "qos": 1,
+          "bindingVersion": "0.2.0",
+          "retain": false
+        }
+      }
+    }
+  },
+  "components": {
+    "messages": {
+      "telemetry": {
+        "name": "PowerTelemetryV1",
+        "contentType": "application/json",
+        "correlationId": {
+          "description": "Application trace identity, not MQTT Packet Identifier.",
+          "location": "$message.payload#/message_id"
+        },
+        "payload": {
+          "schemaFormat": "application/schema+json;version=draft-07",
+          "schema": {
+            "$ref": "./telemetry.schema.json"
+          }
+        },
+        "examples": [
+          {
+            "name": "nominalSnapshot",
+            "payload": {
+              "schema_version": 1,
+              "message_id": "c9042acf-7361-4d21-8840-85033021f201",
+              "device_id": "meter-001",
+              "gateway_id": "gateway-001",
+              "acquired_at": "2026-10-22T01:00:00.000000Z",
+              "raw_registers": [
+                2300,
+                1000,
+                2300,
+                1,
+                4464
+              ],
+              "measurement": {
+                "voltage_v": 230.0,
+                "current_a": 10.0,
+                "power_w": 2300,
+                "energy_wh": 70000
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

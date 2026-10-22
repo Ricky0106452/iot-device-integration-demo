@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "message_id": "c9042acf-7361-4d21-8840-85033021f201",
+  "device_id": "meter-001",
+  "gateway_id": "gateway-001",
+  "acquired_at": "2026-10-22T01:00:00.000000Z",
+  "raw_registers": [
+    2300,
+    1000,
+    2300,
+    1,
+    4464
+  ],
+  "measurement": {
+    "voltage_v": 230.0,
+    "current_a": 10.0,
+    "power_w": 2300,
+    "energy_wh": 70000
+  }
+}

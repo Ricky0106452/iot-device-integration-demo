@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SIM-POWER-01 telemetry v1",
+  "description": "Project contract. Encoding limits are not normal operating thresholds. Cross-field consistency and topic matching require application validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "message_id",
+    "device_id",
+    "gateway_id",
+    "acquired_at",
+    "raw_registers",
+    "measurement"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUID v4, generated once per successfully decoded acquisition; reused unchanged for retries."
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "Logical platform device identity; must match the topic segment, not Modbus Unit ID."
+    },
+    "gateway_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "Configured stable identity of the collecting Gateway; not an MQTT client ID."
+    },
+    "acquired_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+      "description": "UTC complete-response acquisition time, not device sample time. Preserve on retransmission."
+    },
+    "raw_registers": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535
+      },
+      "description": "FC03 addresses 0..4, SIM-POWER-01 high word first."
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "voltage_v",
+        "current_a",
+        "power_w",
+        "energy_wh"
+      ],
+      "properties": {
+        "voltage_v": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 6553.5,
+          "description": "V; raw_registers[0] / 10. Maximum comes from UInt16 encoding, not nominal voltage."
+        },
+        "current_a": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 655.35,
+          "description": "A; raw_registers[1] / 100."
+        },
+        "power_w": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "W; raw_registers[2]."
+        },
+        "energy_wh": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Wh; raw_registers[3] * 65536 + raw_registers[4]."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": 1,
+      "message_id": "c9042acf-7361-4d21-8840-85033021f201",
+      "device_id": "meter-001",
+      "gateway_id": "gateway-001",
+      "acquired_at": "2026-10-22T01:00:00.000000Z",
+      "raw_registers": [
+        2300,
+        1000,
+        2300,
+        1,
+        4464
+      ],
+      "measurement": {
+        "voltage_v": 230.0,
+        "current_a": 10.0,
+        "power_w": 2300,
+        "energy_wh": 70000
+      }
+    }
+  ]
+}
