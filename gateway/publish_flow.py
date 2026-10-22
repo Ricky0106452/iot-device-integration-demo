@@ -1,4 +1,4 @@
-"""串接採集與發布流程；實際使用 Paho 發布的程式將在後續加入。"""
+"""串接採集與發布流程；具體發布行為由呼叫端傳入。"""
 from collections.abc import Callable
 
 from pymodbus.client import ModbusTcpClient

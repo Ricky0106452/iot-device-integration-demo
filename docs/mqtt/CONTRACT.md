@@ -1,6 +1,6 @@
 # MQTT 量測契約 v1
 
-日期：2026-10-22。適用階段 2。狀態：契約已定義，Gateway 發布、平台接收驗證與相關故障案例尚未實作。既有 smoke 腳本僅驗證環境。
+日期：2026-10-22。適用階段 2。狀態：契約、Gateway 單次採集／發布與獨立訂閱端接收已驗證；平台完整接收驗證與其餘故障案例尚未完成。
 
 ## 1. 標準與專案約定的邊界
 
@@ -141,3 +141,32 @@ And 關閉設備 client
 本切片只建立採集與發布的流程邊界；發布函式以測試替身代入。成功快照的契約轉換、Paho adapter 及可操作的發布 CLI 留到下一個情境，不宣稱已完成 MQTT 量測上傳。既有 read_once CLI 的輸出保持一致。
 
 S2-01 實際結果：流程層驗證通過，證據見[失敗不發布紀錄](../verification/stage-2-no-publish-on-failure.md)。發布 adapter 尚未實作，其他階段 2 驗收維持未完成。
+
+### S2-02A：成功快照轉成量測訊息
+
+```gherkin
+Given 已成功解析一筆設備快照，並指定邏輯設備 ID 與 Gateway ID
+When 建立一筆 MQTT 量測訊息
+Then 欄位符合 v1 契約，並產生新的 UUID v4
+And 保留原取得時間、原始暫存器與量測值
+And 不把 Modbus Unit ID 當成邏輯設備 ID
+And 訊息不因後續修改原快照而改變
+```
+
+build_telemetry 只接收 read_snapshot 成功返回的內部快照；檢查成功狀態與兩個識別碼格式，不取代平台完整 schema／跨欄位驗證。每次呼叫代表一筆新採集訊息；重送應重用已建立的訊息，不能重新呼叫此函式。此小步驟不接 Broker、不改採集與發布流程。
+
+S2-02A 實際結果：訊息組裝函式與五個新增測試方法通過，見[驗證紀錄](../verification/stage-2-build-telemetry.md)。尚未接入 Paho 發布或平台接收。
+
+### S2-02B：發布量測並取得 Broker 確認
+
+```gherkin
+Given 設備與 Broker 正常運作
+When Gateway 成功讀取一次、組成訊息並以 QoS 1 發布
+Then 等待連線確認後才發布，retain 為 False
+And 收到 PUBACK 後才輸出 publish_acknowledged
+And 確認逾時回報 publish_unconfirmed，不把結果未知當作未送達
+```
+
+連線拒絕或 CONNACK 逾時時不發布。單次 CLI 不自動重連或重新採集重送；每次執行是新採集，尚無跨程序保存與補傳保證。平台訂閱與完整訊息驗證仍為後續工作。
+
+S2-02B 實際結果：Paho adapter、單次 CLI、27 項本機測試及真實設備模擬器到訂閱端的驗證通過，見[發布驗證紀錄](../verification/stage-2-publish-telemetry.md)。平台服務、持久化、重連與補傳仍未完成。前述 S2-01／S2-02A 的未接入描述是該切片當時的狀態。
