@@ -1,9 +1,53 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "SIM-POWER-01 telemetry v1",
-  "description": "Project contract. Encoding limits are not normal operating thresholds. Cross-field consistency and topic matching require application validation.",
-  "type": "object",
   "additionalProperties": false,
+  "description": "一筆 v1 量測；驗證欄位，不代表已核對 Topic 或完成持久儲存。",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "message_id": {
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Message Id",
+      "type": "string"
+    },
+    "device_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Device Id",
+      "type": "string"
+    },
+    "gateway_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Gateway Id",
+      "type": "string"
+    },
+    "acquired_at": {
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
+      "title": "Acquired At",
+      "type": "string"
+    },
+    "raw_registers": {
+      "items": {
+        "maximum": 65535,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "maxItems": 5,
+      "minItems": 5,
+      "title": "Raw Registers",
+      "type": "array"
+    },
+    "measurement": {
+      "$ref": "#/definitions/Measurement"
+    }
+  },
   "required": [
     "schema_version",
     "message_id",
@@ -13,85 +57,53 @@
     "raw_registers",
     "measurement"
   ],
-  "properties": {
-    "schema_version": {
-      "type": "integer",
-      "const": 1
-    },
-    "message_id": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-      "description": "UUID v4, generated once per successfully decoded acquisition; reused unchanged for retries."
-    },
-    "device_id": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 64,
-      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-      "description": "Logical platform device identity; must match the topic segment, not Modbus Unit ID."
-    },
-    "gateway_id": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 64,
-      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-      "description": "Configured stable identity of the collecting Gateway; not an MQTT client ID."
-    },
-    "acquired_at": {
-      "type": "string",
-      "format": "date-time",
-      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|\\+00:00)$",
-      "description": "UTC complete-response acquisition time, not device sample time. Preserve on retransmission."
-    },
-    "raw_registers": {
-      "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
-      "items": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 65535
-      },
-      "description": "FC03 addresses 0..4, SIM-POWER-01 high word first."
-    },
-    "measurement": {
-      "type": "object",
+  "title": "SIM-POWER-01 telemetry v1",
+  "type": "object",
+  "definitions": {
+    "Measurement": {
       "additionalProperties": false,
+      "description": "四項量測；上下限來自編碼能力，不是正常工作範圍。",
+      "properties": {
+        "voltage_v": {
+          "description": "電壓 V，word0 / 10。",
+          "maximum": 6553.5,
+          "minimum": 0,
+          "title": "Voltage V",
+          "type": "number"
+        },
+        "current_a": {
+          "description": "電流 A，word1 / 100。",
+          "maximum": 655.35,
+          "minimum": 0,
+          "title": "Current A",
+          "type": "number"
+        },
+        "power_w": {
+          "description": "有功功率 W，word2。",
+          "maximum": 65535,
+          "minimum": 0,
+          "title": "Power W",
+          "type": "integer"
+        },
+        "energy_wh": {
+          "description": "累積電量 Wh，word3 * 65536 + word4。",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Energy Wh",
+          "type": "integer"
+        }
+      },
       "required": [
         "voltage_v",
         "current_a",
         "power_w",
         "energy_wh"
       ],
-      "properties": {
-        "voltage_v": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 6553.5,
-          "description": "V; raw_registers[0] / 10. Maximum comes from UInt16 encoding, not nominal voltage."
-        },
-        "current_a": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 655.35,
-          "description": "A; raw_registers[1] / 100."
-        },
-        "power_w": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 65535,
-          "description": "W; raw_registers[2]."
-        },
-        "energy_wh": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 4294967295,
-          "description": "Wh; raw_registers[3] * 65536 + raw_registers[4]."
-        }
-      }
+      "title": "Measurement",
+      "type": "object"
     }
   },
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "examples": [
     {
       "schema_version": 1,

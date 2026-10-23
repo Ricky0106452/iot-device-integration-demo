@@ -5,7 +5,7 @@
 ## 1. 標準與專案約定的邊界
 
 - 通訊採 OASIS MQTT 3.1.1，現有 Paho 與 Mosquitto 可支援；本階段不依賴 MQTT 5 專屬功能。這是功能需求選擇，不代表 MQTT 5 不適用。
-- 介面用 AsyncAPI 3.1.0、MQTT binding 0.2.0 描述，payload 用 JSON Schema Draft-07。文件採 JSON，AsyncAPI 同樣允許 JSON 與 YAML；目前不為文件新增 YAML 套件。
+- 介面用 AsyncAPI 3.1.0、MQTT binding 0.2.0 描述，payload 文件用 JSON Schema Draft-07；接收驗證以 receiver.models 的 Pydantic model 為準，schema 保留作為對外格式文件，契約變更時一併檢查更新。文件採 JSON，AsyncAPI 同樣允許 JSON 與 YAML；目前不為文件新增 YAML 套件。
 - Topic namespace、欄位、識別碼、重送與錯誤處理是本專案契約，不宣稱為統一業界資料模型。
 - 未採 Sparkplug；沒有 Sparkplug SCADA 互通需求，不宣稱相容。
 - 本契約是量測上傳，不定義階段 5 的命令與命令結果，也不在 telemetry 混入錯誤或控制指令。
@@ -116,7 +116,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 - [ ] 重送同一讀值保留 ID／取得時間；新讀值即使值相同仍使用新 ID。
 - [ ] 證明 retain=False；接收端沒有既有訂閱且已離線時，不把 QoS 1 說成資料不會遺失。
 
-本次僅檢查 JSON 語法與文件引用；未安裝 AsyncAPI CLI 或 JSON Schema validator，尚未完成正式規格驗證與執行期驗收，不宣稱工具驗證通過。
+接收模型已有欄位驗證測試；未維護 schema 自動同步工具，也未安裝 AsyncAPI CLI 或 JSON Schema validator，尚未完成正式文件規格驗證與完整接收流程驗收。
 
 ## 參考依據
 
@@ -170,3 +170,17 @@ And 確認逾時回報 publish_unconfirmed，不把結果未知當作未送達
 連線拒絕或 CONNACK 逾時時不發布。單次 CLI 不自動重連或重新採集重送；每次執行是新採集，尚無跨程序保存與補傳保證。平台訂閱與完整訊息驗證仍為後續工作。
 
 S2-02B 實際結果：Paho adapter、單次 CLI、27 項本機測試及真實設備模擬器到訂閱端的驗證通過，見[發布驗證紀錄](../verification/stage-2-publish-telemetry.md)。平台服務、持久化、重連與補傳仍未完成。前述 S2-01／S2-02A 的未接入描述是該切片當時的狀態。
+
+### S2-03A：以 Pydantic 模型驗證訊息
+
+```gherkin
+Given 收到符合現有 v1 契約的 JSON
+When 使用 Telemetry model 驗證
+Then 得到可透過屬性讀取的模型，並保留原 ID、時間與量測值
+And 缺欄位、錯誤型別、額外欄位或非法編碼值必須拒絕
+And 零值、偏高但可編碼的讀值仍接受
+```
+
+此步驟不接 MQTT。接收端使用 Pydantic model 驗證，既有 JSON Schema 保留為介面文件；不安裝 jsonschema。Topic／設備映射、raw 換算一致性、大小限制與拒收後持續接收的流程，留到後續接收處理；不能只因模型驗證通過就當作平台接收驗收完成。
+
+S2-03A 實際結果：Pydantic 2.14.1 接收模型完成；2026-10-23 移除非核心的 schema 產生工具與同步測試，保留 35 項本機測試。見[接收模型驗證紀錄](../verification/stage-2-receiver-model.md)。Paho 訂閱、拒收後持續接收與跨欄位檢查仍待實作。
