@@ -11,10 +11,10 @@
 - 連線／設備例外／解析失敗不產生假量測；可解析的偏高讀值仍保留。
 - Mosquitto 透過 Docker Compose 啟動，Paho smoke script 可驗證發布、訂閱與 QoS 1 確認。
 - 成功快照依契約組裝後，可由單次 CLI 透過 Paho 發布；保留取得時間與量測值，收到 QoS 1 PUBACK 才輸出發布已確認。
-- 已提供 Pydantic 接收模型，執行訊息欄位驗證；現有 JSON Schema 作為對外介面文件，尚未接 MQTT 訂閱。
+- Python 接收端已接上 Paho 訂閱與 Pydantic 欄位驗證，合法資料記錄接收、非法資料記錄拒收後繼續等待；現有 JSON Schema 作為對外介面文件。
 - 已驗證設備失聯不發布、Broker 不可用不記成功；透過獨立訂閱端核對真實發布訊息的資料 ID、時間與量測值。
 
-尚未完成：平台持續接收與完整驗證、持續輪詢、動態電量、設定寫入、資料庫、API、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
+尚未完成：Topic／設備映射與 raw 一致性等完整接收驗證、持續輪詢、動態電量、設定寫入、資料庫、API、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
 
 ## 資料流與責任
 
@@ -23,7 +23,7 @@
 ```text
 Modbus Simulator ──Modbus TCP──> Python Gateway ──MQTT──> Mosquitto
                                                         ↓
-                                            訂閱工具／驗證 client
+                                            Python receiver／訂閱工具
 
 read_once 可單獨輸出讀值；publish_once 執行單次讀值與發布。
 ```
@@ -147,8 +147,9 @@ docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/device
 | `tests/test_mqtt_publish.py` | 7 | QoS／retain、連線拒絕／逾時、PUBACK 確認與未確認結果 |
 | `tests/test_publish_once.py` | 3 | CLI 串接、識別碼追蹤與錯誤分流 |
 | `tests/test_receiver_models.py` | 8 | 接收模型、嚴格型別與欄位限制 |
+| `tests/test_receiver_subscribe.py` | 7 | 接收／拒收、連線與訂閱確認、斷線退出 |
 
-目前已驗證 35 個測試通過；沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
+目前已驗證 42 個測試通過；沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
 
 尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
 
@@ -174,8 +175,22 @@ model = Telemetry.model_validate_json(payload)
 print(model.device_id, model.measurement.voltage_v)
 ```
 
-payload 是收到的 JSON 文字或 bytes；非法資料會拋出 Pydantic ValidationError。這裡尚未建立訂閱迴圈與錯誤紀錄處理。模型檢查欄位，不代表已檢查 Topic 與 raw 換算一致性。
+payload 是收到的 JSON 文字或 bytes；非法資料會拋出 Pydantic ValidationError。訂閱程式已處理模型錯誤並記錄拒收。模型檢查欄位，不代表已檢查 Topic 與 raw 換算一致性。
 
 JSON Schema 保留作為外部介接與 AsyncAPI 的格式文件；接收端直接用 Pydantic model 驗證，不讀取這份 schema。契約變更時才一起檢查並更新文件，目前不維護專用產生工具或自動同步測試。
 
 實作與驗證範圍見 [S2-03A 驗證紀錄](docs/verification/stage-2-receiver-model.md)。
+
+## 執行 Python 接收端
+
+先啟動 Broker，再開一個終端執行：
+
+```powershell
+.\.venv\Scripts\python.exe -m receiver.subscribe
+```
+
+看到 receiver_ready 代表已取得 QoS 1 SUBACK；程式保持執行等待訊息。另一個終端在模擬器運作時執行 gateway.publish_once，接收端應印出 telemetry_received、相同 message_id／acquired_at 與量測，另記 received_at。
+
+缺欄位或錯誤型別記錄 telemetry_rejected 至 stderr，下一筆仍可處理；非法 JSON 也不會直接中止接收。按 Ctrl+C 關閉。Broker 失聯則記錄錯誤並以非零結束，不自動重連。
+
+可用 --broker-host、--broker-port 指定 Broker；--mqtt-timeout 預設 5 秒（上限 5 秒），分別約束連線與啟動確認。驗證後尚不儲存資料，也不代表完整 Topic／raw 一致性檢查已完成。實際結果見 [訂閱驗證紀錄](docs/verification/stage-2-subscribe.md)。

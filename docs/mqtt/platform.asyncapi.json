@@ -3,7 +3,7 @@
   "info": {
     "title": "IoT Integration Demo platform telemetry API",
     "version": "1.0.0",
-    "description": "Platform application perspective. Contract only; device telemetry integration is not implemented yet. Normative behavior: CONTRACT.md."
+    "description": "Platform perspective. MQTT subscription and Pydantic field validation are implemented; full topic/device mapping and raw consistency checks are pending. Normative behavior: CONTRACT.md."
   },
   "defaultContentType": "application/json",
   "servers": {
