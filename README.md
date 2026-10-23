@@ -15,7 +15,7 @@
 - 已建立獨立 PostgreSQL 17 服務、Alembic 初始 migration 與單筆入庫函式（新增／重複／衝突）；MQTT 接收端已接上儲存函式，新增／重複／衝突與拒收後繼續處理已經真實 Broker 和 PostgreSQL 驗證。
 - 已驗證設備失聯不發布、Broker 不可用不記成功；透過獨立訂閱端核對真實發布訊息的資料 ID、時間與量測值。
 
-尚未完成：Topic／設備映射與 raw 一致性等完整接收驗證、持續輪詢、動態電量、設定寫入、API、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
+尚未完成：Topic／設備映射與 raw 一致性等完整接收驗證、持續輪詢、動態電量、設定寫入、指定期間歷史查詢、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
 
 ## 資料流與責任
 
@@ -137,7 +137,7 @@ docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/device
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過七項資料庫測試。
+Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過十五項一般資料庫測試；另外五項 migration 退版測試僅在明確指定獨立測試庫時執行。
 
 | 測試檔案 | 方法數 | 驗證內容 |
 |---|---:|---|
@@ -151,8 +151,10 @@ Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要�
 | `tests/test_receiver_subscribe.py` | 11 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
 | `tests/test_storage_models.py` | 5 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
 | `tests/test_store_telemetry.py` | 4 | 單筆提交、重複保留首次時間、內容衝突與設備隔離 |
+| `tests/test_latest_telemetry.py` | 8 | 最新值排序、設備隔離、回應格式、歷史分頁、404 與 422 |
+| `tests/test_measurement_point_migration.py` | 5 | 僅在自建臨時庫驗證回填、來源約束、重跑與退版防護 |
 
-指定本專案 PostgreSQL 測試連線後，57 個測試全部通過；未指定時共 50 個通過、7 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
+指定本專案 PostgreSQL 測試連線後，一般 DB 測試可執行 65 個方法，另外五項過渡 migration 測試預設跳過。兩種測試連線均指向已確認的獨立測試庫時，70 個方法全部通過；兩者都未指定時共 50 個通過、20 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
 
 尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
 
@@ -203,6 +205,8 @@ DB 例外不會產生成功 log，目前沿既有 callback 錯誤路徑傳回主
 
 ## PostgreSQL 與 migration
 
+> 多感測點改版進行中：新增 0002 過渡 migration，僅在獨立測試庫驗證，使用者本機仍為 0001。ORM／接收／查詢尚未切換，請先不要在現有 DB 執行 upgrade head 或 autogenerate；詳細限制見 [過渡 migration 驗證](docs/verification/multi-sensor-migration.md)。下方原建表操作在完成切換前須依此限制使用。
+
 使用已有的 postgres:17 image，Compose 建立本專案獨立服務與 postgres-data volume。主機位址為 127.0.0.1:15433；不使用其他專案的 PostgreSQL 容器。
 
 新資料庫由第一份 migration 建表：
@@ -248,4 +252,37 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-測試同樣透過 migration 建立／升版量測表。一般讀寫測試回滾；升版保留資料測試會提交自己建立的隨機資料，結束時只刪除該筆。新資料庫升版、測試庫退版再升版與既有表接軌證據見 [migration 驗證紀錄](docs/verification/stage-3-migrations.md)。單筆儲存函式已接入 MQTT receiver，去重／衝突處理已驗證；尚無 API。見 [單筆入庫驗證](docs/verification/stage-3-store-telemetry.md)。
+測試同樣透過 migration 建立／升版量測表。一般讀寫測試回滾；升版保留資料測試會提交自己建立的隨機資料，結束時只刪除該筆。新資料庫升版、測試庫退版再升版與既有表接軌證據見 [migration 驗證紀錄](docs/verification/stage-3-migrations.md)。單筆儲存函式已接入 MQTT receiver，去重／衝突處理已驗證；最新量測與全設備分頁歷史 API 已完成，指定期間篩選尚未實作。見 [單筆入庫驗證](docs/verification/stage-3-store-telemetry.md)。
+
+
+## 查詢設備最新量測
+
+先確認 PostgreSQL 已啟動且 migration 已套用。API 是獨立程序，不必為查詢另外啟動 receiver 或模擬器；它讀取已保存的資料。
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
+
+啟動後開啟：
+
+- 最新值：http://127.0.0.1:8000/devices/meter-001/telemetry/latest
+- Swagger UI：http://127.0.0.1:8000/docs
+
+按 Ctrl+C 停止。資料庫連線沿用 DATABASE_URL 或本機示範預設，不自動建表或執行 migration。
+
+成功回傳 200，包含取得／接收時間、原始暫存器與巢狀 measurement；未找到量測回傳 404，不合法的設備 ID 回傳 422。最新值依 acquired_at DESC、message_id DESC 取一筆，不以到達順序判斷。同時間的 UUID 排序只提供穩定結果，不代表採集先後。全設備歷史查詢見下方；未新增索引或 migration；不宣稱已驗證大量資料效能。
+
+規格見 [最新量測 API](docs/api/LATEST_TELEMETRY.md)，驗證見 [API 驗證紀錄](docs/verification/stage-3-latest-api.md)。目前 Starlette 1.9.0 的 TestClient 對 HTTPX 發出淘汰提醒，現有測試仍通過；本次保留已確認的組合，未另外安裝 HTTPX2 或更換版本。
+
+
+## 查詢所有設備的歷史量測
+
+不需要知道設備 ID，直接開啟 http://127.0.0.1:8000/telemetry 。回傳量測陣列，每筆都包含 device_id。
+
+- 預設最新 100 筆，依 acquired_at DESC、device_id ASC、message_id DESC 排序。
+- limit 介於 1～1000，offset 至少為 0。例如 /telemetry?limit=100&offset=100 查下一頁。
+- 空頁回傳 200 與 []；參數不合法回傳 422。
+- 這是可翻頁的全設備歷史查詢，不一次載入無限資料；尚未加入設備／期間篩選或總筆數查詢。
+- 查詢期間若有新增資料，offset 頁面可能位移，不保證跨請求固定快照。
+
+修改程式後需重啟未使用 reload 的 Uvicorn 才能看到新端點。規格見 [全設備歷史查詢](docs/api/HISTORY_TELEMETRY.md)。

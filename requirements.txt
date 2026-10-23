@@ -4,3 +4,6 @@ pydantic==2.14.1
 sqlmodel==0.0.48
 psycopg[binary]==3.3.6
 alembic==1.20.1
+fastapi==0.159.1
+uvicorn==0.54.0
+httpx==0.28.1
