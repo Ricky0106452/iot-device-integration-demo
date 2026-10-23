@@ -1,8 +1,10 @@
 """MQTT 訂閱與欄位驗證；完整契約驗證將分步補齊。"""
 import argparse
+from functools import partial
 from datetime import datetime, timezone
 import json
 import math
+import os
 import sys
 from threading import Event
 from uuid import uuid4
@@ -11,13 +13,15 @@ import paho.mqtt.client as mqtt
 from pydantic import ValidationError
 
 from receiver.models import Telemetry
+from storage.database import DEFAULT_DATABASE_URL, create_db_engine
+from storage.telemetry import store_telemetry
 
 TOPIC_FILTER = "okgo/demo/v1/devices/+/telemetry"
 
 
-def handle_message(topic: str, payload: bytes) -> None:
+def handle_message(topic: str, payload: bytes, *, store) -> None:
     """處理單筆訊息；只攔截預期驗證錯誤，不吞掉程式缺陷。"""
-    received_at = datetime.now(timezone.utc).isoformat()
+    received_at = datetime.now(timezone.utc)
     try:
         model = Telemetry.model_validate_json(payload)
     except ValidationError as exc:
@@ -26,14 +30,23 @@ def handle_message(topic: str, payload: bytes) -> None:
         code = "invalid_json" if error["type"] == "json_invalid" else "invalid_payload"
         print(json.dumps({
             "event": "telemetry_rejected", "code": code, "topic": topic,
-            "received_at": received_at, "reason": error["msg"],
+            "received_at": received_at.isoformat(), "reason": error["msg"],
             "field": list(error["loc"]),
         }, ensure_ascii=False), file=sys.stderr, flush=True)
         return
-    print(json.dumps({
-        "event": "telemetry_received", "topic": topic, "received_at": received_at,
-        **model.model_dump(mode="json"),
-    }, ensure_ascii=False), flush=True)
+    result = store(model, received_at=received_at)
+    event_names = {"stored": "telemetry_stored", "duplicate": "telemetry_duplicate",
+                   "conflict": "telemetry_conflict"}
+    event = {
+        "event": event_names[result], "topic": topic,
+        "device_id": model.device_id, "message_id": model.message_id,
+        "gateway_id": model.gateway_id, "acquired_at": model.acquired_at,
+        "received_at": received_at.isoformat(),
+    }
+    if result == "stored":
+        event["stored_at"] = datetime.now(timezone.utc).isoformat()
+    print(json.dumps(event, ensure_ascii=False),
+          file=sys.stderr if result == "conflict" else sys.stdout, flush=True)
 
 
 class ReceiverError(Exception):
@@ -44,7 +57,7 @@ class ReceiverError(Exception):
         self.code = code
 
 
-def run_receiver(client, *, host="127.0.0.1", port=1883, timeout=5.0) -> int:
+def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> int:
     """等待連線與訂閱確認後持續接收；結束時清理傳入的 client。"""
     if not math.isfinite(timeout) or not 0 < timeout <= 5:
         raise ValueError("等待秒數必須大於 0 且不超過 5")
@@ -69,7 +82,7 @@ def run_receiver(client, *, host="127.0.0.1", port=1883, timeout=5.0) -> int:
 
     def on_message(client, userdata, message):
         try:
-            handle_message(message.topic, message.payload)
+            handle_message(message.topic, message.payload, store=store)
         except Exception as exc:
             # 把非預期錯誤交回主執行緒拋出，不能讓背景執行緒死掉後假裝仍在接收。
             callback_errors.append(exc)
@@ -120,7 +133,7 @@ def run_receiver(client, *, host="127.0.0.1", port=1883, timeout=5.0) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="訂閱量測並以 Pydantic 驗證欄位")
+    parser = argparse.ArgumentParser(description="訂閱量測、驗證欄位並寫入 PostgreSQL")
     parser.add_argument("--broker-host", default="127.0.0.1")
     parser.add_argument("--broker-port", type=int, default=1883)
     parser.add_argument("--mqtt-timeout", type=float, default=5.0)
@@ -134,8 +147,13 @@ def main(argv=None) -> int:
         client_id=f"rx-{uuid4().hex[:20]}", clean_session=True,
         protocol=mqtt.MQTTv311, reconnect_on_failure=False,
     )
-    return run_receiver(client, host=args.broker_host, port=args.broker_port,
-                        timeout=args.mqtt_timeout)
+    engine = create_db_engine(os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL))
+    try:
+        return run_receiver(client, store=partial(store_telemetry, engine),
+                            host=args.broker_host, port=args.broker_port,
+                            timeout=args.mqtt_timeout)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

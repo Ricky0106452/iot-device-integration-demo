@@ -12,10 +12,10 @@
 - Mosquitto 透過 Docker Compose 啟動，Paho smoke script 可驗證發布、訂閱與 QoS 1 確認。
 - 成功快照依契約組裝後，可由單次 CLI 透過 Paho 發布；保留取得時間與量測值，收到 QoS 1 PUBACK 才輸出發布已確認。
 - Python 接收端已接上 Paho 訂閱與 Pydantic 欄位驗證，合法資料記錄接收、非法資料記錄拒收後繼續等待；現有 JSON Schema 作為對外介面文件。
-- 已建立獨立 PostgreSQL 17 服務與 Alembic 初始 migration；MQTT 接收端尚未寫入資料庫。
+- 已建立獨立 PostgreSQL 17 服務、Alembic 初始 migration 與單筆入庫函式（新增／重複／衝突）；MQTT 接收端已接上儲存函式，新增／重複／衝突與拒收後繼續處理已經真實 Broker 和 PostgreSQL 驗證。
 - 已驗證設備失聯不發布、Broker 不可用不記成功；透過獨立訂閱端核對真實發布訊息的資料 ID、時間與量測值。
 
-尚未完成：Topic／設備映射與 raw 一致性等完整接收驗證、持續輪詢、動態電量、設定寫入、MQTT 資料入庫、API、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
+尚未完成：Topic／設備映射與 raw 一致性等完整接收驗證、持續輪詢、動態電量、設定寫入、API、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
 
 ## 資料流與責任
 
@@ -24,7 +24,7 @@
 ```text
 Modbus Simulator ──Modbus TCP──> Python Gateway ──MQTT──> Mosquitto
                                                         ↓
-                                            Python receiver／訂閱工具
+                                            Python receiver → PostgreSQL
 
 read_once 可單獨輸出讀值；publish_once 執行單次讀值與發布。
 ```
@@ -137,7 +137,7 @@ docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/device
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過三項資料庫測試。
+Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過七項資料庫測試。
 
 | 測試檔案 | 方法數 | 驗證內容 |
 |---|---:|---|
@@ -148,10 +148,11 @@ Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要�
 | `tests/test_mqtt_publish.py` | 7 | QoS／retain、連線拒絕／逾時、PUBACK 確認與未確認結果 |
 | `tests/test_publish_once.py` | 3 | CLI 串接、識別碼追蹤與錯誤分流 |
 | `tests/test_receiver_models.py` | 8 | 接收模型、嚴格型別與欄位限制 |
-| `tests/test_receiver_subscribe.py` | 7 | 接收／拒收、連線與訂閱確認、斷線退出 |
+| `tests/test_receiver_subscribe.py` | 10 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
 | `tests/test_storage_models.py` | 5 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
+| `tests/test_store_telemetry.py` | 4 | 單筆提交、重複保留首次時間、內容衝突與設備隔離 |
 
-指定本專案 PostgreSQL 測試連線後，47 個測試全部通過；未指定時共 44 個通過、3 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
+指定本專案 PostgreSQL 測試連線後，54 個測試全部通過；未指定時共 47 個通過、7 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
 
 尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
 
@@ -186,17 +187,19 @@ JSON Schema 保留作為外部介接與 AsyncAPI 的格式文件；接收端直�
 
 ## 執行 Python 接收端
 
-先啟動 Broker，再開一個終端執行：
+先依下方 migration 步驟備妥 PostgreSQL 並啟動 Broker，再開一個終端執行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m receiver.subscribe
 ```
 
-看到 receiver_ready 代表已取得 QoS 1 SUBACK；程式保持執行等待訊息。另一個終端在模擬器運作時執行 gateway.publish_once，接收端應印出 telemetry_received、相同 message_id／acquired_at 與量測，另記 received_at。
+看到 receiver_ready 代表已取得 QoS 1 SUBACK；程式保持執行等待訊息。另一個終端在模擬器運作時執行 gateway.publish_once，接收端應在 DB commit 成功後印出 telemetry_stored，包含相同 message_id／acquired_at、received_at 與 stored_at；量測保存在 telemetry_readings，不再整包印出。相同內容重送印 telemetry_duplicate；同 ID 內容不同則記 telemetry_conflict 至 stderr，原資料不變。
 
 缺欄位或錯誤型別記錄 telemetry_rejected 至 stderr，下一筆仍可處理；非法 JSON 也不會直接中止接收。按 Ctrl+C 關閉。Broker 失聯則記錄錯誤並以非零結束，不自動重連。
 
-可用 --broker-host、--broker-port 指定 Broker；--mqtt-timeout 預設 5 秒（上限 5 秒），分別約束連線與啟動確認。驗證後尚不儲存資料，也不代表完整 Topic／raw 一致性檢查已完成。實際結果見 [訂閱驗證紀錄](docs/verification/stage-2-subscribe.md)。
+可用 --broker-host、--broker-port 指定 Broker；--mqtt-timeout 預設 5 秒（上限 5 秒），分別約束連線與啟動確認。儲存連線沿用 DATABASE_URL 或 storage/database.py 的本機示範預設；不在 receiver 啟動時自動執行 migration。receiver_ready 只表示 MQTT 訂閱完成，不保證 DB 可用。完整 Topic／raw 一致性檢查仍未完成。接入儲存的結果見 [MQTT 入庫驗證](docs/verification/stage-3-receiver-storage.md)；早期僅接收版本見 [訂閱驗證紀錄](docs/verification/stage-2-subscribe.md)。
+
+DB 例外不會產生成功 log，目前沿既有 callback 錯誤路徑傳回主執行緒並結束程式；這是目前實作限制，尚未實作可恢復的 DB 故障處理，不代表已完成正式故障策略。沒有緩衝、重試或補存保證。
 
 ## PostgreSQL 與 migration
 
@@ -210,7 +213,7 @@ docker compose up -d --wait postgres
 .\.venv\Scripts\python.exe -m alembic current
 ```
 
-目前版本為 0001 (head)，建立 telemetry_readings 與 Alembic 的 alembic_version。Entity 在 storage/models.py，版本快照在 migrations/versions/；欄位規格見 [資料表規格](docs/storage/SCHEMA.md)。MQTT 接收端尚未入庫。
+目前版本為 0001 (head)，建立 telemetry_readings 與 Alembic 的 alembic_version。Entity 在 storage/models.py，版本快照在 migrations/versions/；欄位規格見 [資料表規格](docs/storage/SCHEMA.md)。MQTT 接收端已寫入 telemetry_readings。
 
 本機示範帳號／密碼／資料庫為 iot_demo／iot_demo_local／iot_demo，僅供 localhost 開發。預設 URL 與 Compose 相同，其他環境以 DATABASE_URL 指定：
 
@@ -245,4 +248,4 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-測試同樣透過 migration 建立／升版量測表。一般讀寫測試回滾；升版保留資料測試會提交自己建立的隨機資料，結束時只刪除該筆。新資料庫升版、測試庫退版再升版與既有表接軌證據見 [migration 驗證紀錄](docs/verification/stage-3-migrations.md)。尚無 MQTT 入庫服務、去重流程或 API。
+測試同樣透過 migration 建立／升版量測表。一般讀寫測試回滾；升版保留資料測試會提交自己建立的隨機資料，結束時只刪除該筆。新資料庫升版、測試庫退版再升版與既有表接軌證據見 [migration 驗證紀錄](docs/verification/stage-3-migrations.md)。單筆儲存函式已接入 MQTT receiver，去重／衝突處理已驗證；尚無 API。見 [單筆入庫驗證](docs/verification/stage-3-store-telemetry.md)。
