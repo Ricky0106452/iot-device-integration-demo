@@ -65,18 +65,20 @@
       "description": "四項量測；上下限來自編碼能力，不是正常工作範圍。",
       "properties": {
         "voltage_v": {
-          "description": "電壓 V，word0 / 10。",
+          "description": "電壓 V，word0 / 10，解析度 0.1 V。",
           "maximum": 6553.5,
           "minimum": 0,
           "title": "Voltage V",
-          "type": "number"
+          "type": "number",
+          "multipleOf": 0.1
         },
         "current_a": {
-          "description": "電流 A，word1 / 100。",
+          "description": "電流 A，word1 / 100，解析度 0.01 A。",
           "maximum": 655.35,
           "minimum": 0,
           "title": "Current A",
-          "type": "number"
+          "type": "number",
+          "multipleOf": 0.01
         },
         "power_w": {
           "description": "有功功率 W，word2。",

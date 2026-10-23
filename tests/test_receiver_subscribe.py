@@ -81,6 +81,20 @@ class ReceiverSubscribeTests(unittest.TestCase):
                 self.assertNotIn("secret-data", errors.getvalue())
 
 
+    def test_invalid_precision_is_rejected_before_storage(self):
+        for field, value in [("voltage_v", 230.04), ("current_a", 10.001)]:
+            with self.subTest(field=field):
+                self.message["measurement"][field] = value
+                output, errors = io.StringIO(), io.StringIO()
+                with redirect_stdout(output), redirect_stderr(errors):
+                    handle_message(TOPIC, json.dumps(self.message).encode(), store=self.store)
+                self.store.assert_not_called()
+                self.assertEqual(output.getvalue(), "")
+                event = json.loads(errors.getvalue())
+                self.assertEqual(event["event"], "telemetry_rejected")
+                self.assertEqual(event["field"], ["measurement", field])
+                self.message["measurement"][field] = 230.0 if field == "voltage_v" else 10.0
+
     def test_duplicate_and_conflict_log_the_storage_result(self):
         for result in ["duplicate", "conflict"]:
             with self.subTest(result=result):

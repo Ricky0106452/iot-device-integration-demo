@@ -1,5 +1,6 @@
 """MQTT 接收訊息的欄位與驗證規則。"""
 from datetime import datetime
+from decimal import Decimal
 import re
 from typing import Annotated, Literal
 
@@ -17,10 +18,22 @@ class Measurement(BaseModel):
     """四項量測；上下限來自編碼能力，不是正常工作範圍。"""
     model_config = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
 
-    voltage_v: float = Field(ge=0, le=6553.5, description="電壓 V，word0 / 10。")
-    current_a: float = Field(ge=0, le=655.35, description="電流 A，word1 / 100。")
+    voltage_v: float = Field(ge=0, le=6553.5, description="電壓 V，word0 / 10，解析度 0.1 V。",
+                             json_schema_extra={"multipleOf": 0.1})
+    current_a: float = Field(ge=0, le=655.35, description="電流 A，word1 / 100，解析度 0.01 A。",
+                             json_schema_extra={"multipleOf": 0.01})
     power_w: int = Field(ge=0, le=65535, description="有功功率 W，word2。")
     energy_wh: int = Field(ge=0, le=4294967295, description="累積電量 Wh，word3 * 65536 + word4。")
+
+
+    @field_validator("voltage_v", "current_a")
+    @classmethod
+    def require_device_resolution(cls, value: float, info) -> float:
+        # 以十進位檢查刻度，不使用浮點餘數，也不替來源值四捨五入。
+        step = Decimal("0.1") if info.field_name == "voltage_v" else Decimal("0.01")
+        if Decimal(str(value)) % step != 0:
+            raise ValueError(f"數值必須是設備解析度 {step} 的整數倍")
+        return value
 
 
 class Telemetry(BaseModel):

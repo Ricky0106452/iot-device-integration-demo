@@ -65,11 +65,15 @@ class StoreTelemetryTests(unittest.TestCase):
         self.assertEqual(row.energy_wh, 70000)
 
     def test_duplicate_preserves_first_received_time(self):
+        self.payload["raw_registers"][:2] = [2301, 1001]
+        self.payload["measurement"].update(voltage_v=230.1, current_a=10.01)
         self.store()
         # 相同時間點的不同 UTC 表示與不同接收時間，不應判成衝突。
         self.payload["acquired_at"] = "2026-10-22T01:00:00+00:00"
         self.assertEqual(self.store(received_at=self.received_at + timedelta(seconds=5)), "duplicate")
         self.assertEqual(self.read().received_at, self.received_at)
+        self.assertEqual(self.read().voltage_v, Decimal("230.1"))
+        self.assertEqual(self.read().current_a, Decimal("10.01"))
 
     def test_changed_source_fields_are_conflicts_and_original_is_preserved(self):
         self.store()
@@ -77,7 +81,7 @@ class StoreTelemetryTests(unittest.TestCase):
             "gateway_id": "gateway-002",
             "acquired_at": "2026-10-22T01:00:01Z",
             "raw_registers": [2301, 1000, 2300, 1, 4464],
-            "measurement": {**self.payload["measurement"], "power_w": 2400},
+            "measurement": {**self.payload["measurement"], "voltage_v": 230.1, "current_a": 10.01},
         }
         for field, value in changes.items():
             with self.subTest(field=field):
@@ -86,6 +90,8 @@ class StoreTelemetryTests(unittest.TestCase):
         row = self.read()
         self.assertEqual(row.gateway_id, "gateway-001")
         self.assertEqual(row.power_w, 2300)
+        self.assertEqual(row.voltage_v, Decimal("230.0"))
+        self.assertEqual(row.current_a, Decimal("10.00"))
         self.assertEqual(row.raw_registers, self.payload["raw_registers"])
         self.assertEqual(row.received_at, self.received_at)
 

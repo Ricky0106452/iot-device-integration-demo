@@ -147,12 +147,12 @@ Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要�
 | `tests/test_telemetry.py` | 5 | 契約訊息組裝、UUID、原取得時間、資料隔離與 ID 格式 |
 | `tests/test_mqtt_publish.py` | 7 | QoS／retain、連線拒絕／逾時、PUBACK 確認與未確認結果 |
 | `tests/test_publish_once.py` | 3 | CLI 串接、識別碼追蹤與錯誤分流 |
-| `tests/test_receiver_models.py` | 8 | 接收模型、嚴格型別與欄位限制 |
-| `tests/test_receiver_subscribe.py` | 10 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
+| `tests/test_receiver_models.py` | 10 | 接收模型、嚴格型別、欄位限制與設備解析度 |
+| `tests/test_receiver_subscribe.py` | 11 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
 | `tests/test_storage_models.py` | 5 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
 | `tests/test_store_telemetry.py` | 4 | 單筆提交、重複保留首次時間、內容衝突與設備隔離 |
 
-指定本專案 PostgreSQL 測試連線後，54 個測試全部通過；未指定時共 47 個通過、7 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
+指定本專案 PostgreSQL 測試連線後，57 個測試全部通過；未指定時共 50 個通過、7 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
 
 尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
 
@@ -179,7 +179,7 @@ model = Telemetry.model_validate_json(payload)
 print(model.device_id, model.measurement.voltage_v)
 ```
 
-payload 是收到的 JSON 文字或 bytes；非法資料會拋出 Pydantic ValidationError。訂閱程式已處理模型錯誤並記錄拒收。模型檢查欄位，不代表已檢查 Topic 與 raw 換算一致性。
+payload 是收到的 JSON 文字或 bytes；非法資料會拋出 Pydantic ValidationError。訂閱程式已處理模型錯誤並記錄拒收。模型檢查欄位，不代表已檢查 Topic 與 raw 換算一致性。 電壓只接受 0.1 V 刻度、電流只接受 0.01 A 刻度；超出解析度拒收，不讓 DB 四捨五入後造成重送誤判。
 
 JSON Schema 保留作為外部介接與 AsyncAPI 的格式文件；接收端直接用 Pydantic model 驗證，不讀取這份 schema。契約變更時才一起檢查並更新文件，目前不維護專用產生工具或自動同步測試。
 

@@ -35,6 +35,27 @@ class TelemetryModelTests(unittest.TestCase):
         message = build_telemetry(snapshot, device_id="meter-001", gateway_id="gateway-001")
         self.assertEqual(self.parse(message).model_dump(mode="json"), message)
 
+    def test_rejects_values_between_device_steps(self):
+        for field, value in [("voltage_v", 230.04), ("voltage_v", 0.01),
+                             ("current_a", 10.001), ("current_a", 0.001)]:
+            message = deepcopy(self.example)
+            message["measurement"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValidationError):
+                self.parse(message)
+
+    def test_accepts_exact_device_steps_without_rounding(self):
+        for voltage, current in [(230, 10), (230.1, 10.01), (0.3, 0.03),
+                                 (6553.5, 655.35), (0, 0)]:
+            message = deepcopy(self.example)
+            message["measurement"].update(voltage_v=voltage, current_a=current)
+            with self.subTest(voltage=voltage, current=current):
+                model = self.parse(message)
+                self.assertEqual(model.measurement.voltage_v, voltage)
+                self.assertEqual(model.measurement.current_a, current)
+        # JSON 的小數尾零只改變表示，不改變數值。
+        raw = json.dumps(self.example).replace('"voltage_v": 230.0', '"voltage_v": 230.00')
+        self.assertEqual(Telemetry.model_validate_json(raw).measurement.voltage_v, 230)
+
     def test_every_contract_field_is_required(self):
         for field in self.example:
             message = deepcopy(self.example)

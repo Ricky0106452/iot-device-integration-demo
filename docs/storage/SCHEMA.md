@@ -98,3 +98,14 @@ Then 非法訊息拒收且不呼叫儲存，下一筆仍可正常入庫
 receiver 使用既有 DATABASE_URL 或本機示範預設建立 engine，結束時 dispose，不自動執行 migration。MQTT ready 不代表 DB 連線檢查成功。只有新增事件含 stored_at（提交後的應用時間，不是 DB 精準提交時間）；完整量測留在 DB，不再每筆輸出 telemetry_received。
 
 儲存例外目前沿既有 callback 錯誤通道傳回主執行緒，會結束程式，不能解讀為已實作 DB 暫時故障策略。使用者已決定將 DB 故障恢復留到 MVP 後處理，本次不增加緩衝、重試、ACK／session 變更或補存承諾。
+
+
+## 解析度一致性修正（2026-10-23）
+
+接收模型原先容許 230.04 V 等超出設備刻度的數值，DB numeric(5,1) 保存後會四捨五入，重送時與原值比較可能誤判 conflict。
+
+現在接收模型以十進位語意限制電壓為 0.1 V、電流為 0.01 A 的整數倍；不自動捨入。既有 DB 型別不變、不新增 migration。模型驗證通過的合法刻度可由目前 DB 原樣保存。對外 JSON Schema 同步 multipleOf。
+
+回歸驗證包含超出解析度拒收且不呼叫儲存、合法刻度與尾零表示接受、230.1 V／10.01 A 入庫後重送回傳 duplicate，以及改成不同合法數值回傳 conflict 且不覆寫原量測。57 個測試全部通過、無跳過（含真實 PostgreSQL），耗時 1.739 秒；這是本機結果，沒有遠端 CI。
+
+此修正仍使用既有 float DTO，再以 Decimal(str(value)) 驗證已解析數值；不宣稱保存任意高精度 JSON 數字原文。完整 raw 換算一致性檢查仍未完成。
