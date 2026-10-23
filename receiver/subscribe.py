@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from receiver.models import Telemetry
 from storage.database import DEFAULT_DATABASE_URL, create_db_engine
+from storage.device_setup import DeviceConfigurationError
 from storage.telemetry import store_telemetry
 
 TOPIC_FILTER = "okgo/demo/v1/devices/+/telemetry"
@@ -34,7 +35,15 @@ def handle_message(topic: str, payload: bytes, *, store) -> None:
             "field": list(error["loc"]),
         }, ensure_ascii=False), file=sys.stderr, flush=True)
         return
-    result = store(model, received_at=received_at)
+    try:
+        result = store(model, received_at=received_at)
+    except DeviceConfigurationError as exc:
+        print(json.dumps({
+            "event": "telemetry_rejected", "code": "device_configuration_error",
+            "topic": topic, "device_id": model.device_id, "message_id": model.message_id,
+            "received_at": received_at.isoformat(), "reason": str(exc),
+        }, ensure_ascii=False), file=sys.stderr, flush=True)
+        return
     event_names = {"stored": "telemetry_stored", "duplicate": "telemetry_duplicate",
                    "conflict": "telemetry_conflict"}
     event = {

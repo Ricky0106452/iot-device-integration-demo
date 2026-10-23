@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import paho.mqtt.client as mqtt
 
 from receiver.subscribe import handle_message, run_receiver
+from storage.device_setup import DeviceConfigurationError
 
 TOPIC = "okgo/demo/v1/devices/meter-001/telemetry"
 
@@ -106,6 +107,16 @@ class ReceiverSubscribeTests(unittest.TestCase):
                 self.assertEqual(event["event"], f"telemetry_{result}")
                 self.assertEqual(event["message_id"], self.message["message_id"])
                 self.assertNotIn("stored_at", event)
+
+    def test_configuration_rejection_does_not_stop_next_valid_message(self):
+        self.store.side_effect = [DeviceConfigurationError("點位尚未設定"), "stored"]
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            handle_message(TOPIC, json.dumps(self.message).encode(), store=self.store)
+            handle_message(TOPIC, json.dumps(self.message).encode(), store=self.store)
+        self.assertEqual(json.loads(errors.getvalue())["code"], "device_configuration_error")
+        self.assertEqual(json.loads(output.getvalue())["event"], "telemetry_stored")
+        self.assertEqual(self.store.call_count, 2)
 
     def test_storage_error_does_not_log_success_or_disappear(self):
         self.store.side_effect = RuntimeError("寫入失敗")

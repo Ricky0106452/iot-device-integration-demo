@@ -112,3 +112,24 @@ Entity 明確定義 migration 0002 的主鍵、命名複合外鍵、唯一約束
 在獨立測試庫升到 0002 後，全套 73 測試通過，Alembic check 無差異。另以 Entity 讀回 migration 回填的設備、點位、NUMERIC 值與 JSONB 快照，確認非僅欄位名稱相同。
 
 主庫仍是 0001；目前工作目錄的 Entity 需要 0002 欄位，暫不可重啟改版 receiver/API 連主庫。第二步仍需改寫入庫，避免對回填快照以新欄位 None 比較造成衝突，並在同交易新增四筆點位值。完成後續步驟才切換主庫。
+
+
+## 四步改版的第二步：入庫已完成
+
+storage/device_setup.py 提供明確的電表設備與四點位初始化，重跑不覆寫既有語意；receiver 不自動建立設定。storage/telemetry.py 現已在同一交易保存來源快照（含 model_code／source_data）、原電表相容欄位與四筆 readings。
+
+完整重送不新增值、不刷新首次接收時間；不同來源內容回 conflict，缺失／不一致的既有點位資料是系統一致性錯誤，不冒充 duplicate 或自動修補。receiver 將設備／點位設定錯誤記為明確拒收，不吞掉 DB 系統例外。通用點位 API 與主庫升版仍未完成。
+
+本次沒有新增 migration、修改設備 MQTT 格式或加入 DB 故障重試。完整驗證見 [入庫紀錄](../verification/measurement-point-ingestion.md)。
+
+
+## 四步改版的第三步：通用點位 API 已完成
+
+已新增設備探索、設備點位清單、點位歷史三支路由，依 point_id 查詢不依賴固定電表欄位。Decimal 以十進位字串回傳；舊電表 API 相容。獨立庫全套 85 測試通過，真實 HTTP 驗收通過。規格見 [點位 API](../api/POINT_READINGS.md)，主庫切換仍待第 4 步。
+
+
+## 四步改版的第四步：主庫切換已完成
+
+本機 iot_demo 已從 0001 升到 0002，先以 pg_dump 備份並在獨立 DB 實際還原比對，再於單一交易鎖定來源表、升版與逐項驗證回填。原快照保留；另用真實 Modbus→Gateway→MQTT→receiver→DB→HTTP 增加一份展示快照，現為一台設備、四點位、兩份快照、八筆值。
+
+先前「主庫 0001，暫不可重啟改版程式」的操作限制已解除。以上各節保留作為階段紀錄，現在以 [切換驗證](../verification/measurement-point-cutover.md) 為準。尚未移除舊電表欄位或收緊過渡 nullable／設備外鍵；不宣稱水表通訊已實作或 DB 故障恢復已完成。

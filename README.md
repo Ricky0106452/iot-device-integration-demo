@@ -137,7 +137,7 @@ docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/device
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過十五項一般資料庫測試；另外七項 migration／ORM 測試僅在明確指定獨立測試庫時執行。
+Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過二十六項一般資料庫測試；另外七項 migration／ORM 測試僅在明確指定獨立測試庫時執行。
 
 | 測試檔案 | 方法數 | 驗證內容 |
 |---|---:|---|
@@ -148,13 +148,14 @@ Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要�
 | `tests/test_mqtt_publish.py` | 7 | QoS／retain、連線拒絕／逾時、PUBACK 確認與未確認結果 |
 | `tests/test_publish_once.py` | 3 | CLI 串接、識別碼追蹤與錯誤分流 |
 | `tests/test_receiver_models.py` | 10 | 接收模型、嚴格型別、欄位限制與設備解析度 |
-| `tests/test_receiver_subscribe.py` | 11 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
+| `tests/test_receiver_subscribe.py` | 12 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
 | `tests/test_storage_models.py` | 6 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
-| `tests/test_store_telemetry.py` | 4 | 單筆提交、重複保留首次時間、內容衝突與設備隔離 |
+| `tests/test_store_telemetry.py` | 9 | 快照＋四點值提交、原子回滾、重複／衝突、設備設定與資料完整性 |
 | `tests/test_latest_telemetry.py` | 8 | 最新值排序、設備隔離、回應格式、歷史分頁、404 與 422 |
+| `tests/test_point_api.py` | 6 | 設備／點位探索、歷史排序／分頁、精度、404 與 422 |
 | `tests/test_measurement_point_migration.py` | 7 | 僅在自建臨時庫驗證回填、來源約束、重跑、退版防護與 ORM 對齊 |
 
-指定本專案 PostgreSQL 測試連線後，一般 DB 測試可執行 66 個方法，另外七項過渡 migration／ORM 測試預設跳過。兩種測試連線均指向已確認的獨立測試庫時，73 個方法全部通過；兩者都未指定時共 51 個通過、22 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
+指定本專案 PostgreSQL 測試連線後，一般 DB 測試可執行 78 個方法，另外七項過渡 migration／ORM 測試預設跳過。兩種測試連線均指向已確認的獨立測試庫時，85 個方法全部通過；兩者都未指定時共 52 個通過、33 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
 
 尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
 
@@ -189,7 +190,7 @@ JSON Schema 保留作為外部介接與 AsyncAPI 的格式文件；接收端直�
 
 ## 執行 Python 接收端
 
-先依下方 migration 步驟備妥 PostgreSQL 並啟動 Broker，再開一個終端執行：
+先依下方 migration 步驟備妥 PostgreSQL、執行 storage.device_setup 初始化設備並啟動 Broker，再開一個終端執行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m receiver.subscribe
@@ -205,7 +206,7 @@ DB 例外不會產生成功 log，目前沿既有 callback 錯誤路徑傳回主
 
 ## PostgreSQL 與 migration
 
-> 多感測點改版進行中：新增 0002 過渡 migration，僅在獨立測試庫驗證，使用者本機仍為 0001。ORM 已對齊 0002；接收／查詢尚未切換。主 DB 仍是 0001，改版程式不可重啟連主庫；請先不要在現有 DB 執行 upgrade head 或 autogenerate；詳細限制見 [過渡 migration 驗證](docs/verification/multi-sensor-migration.md)。下方原建表操作在完成切換前須依此限制使用。
+> 四步資料庫改版已完成，本機資料庫為 0002，ORM、入庫與點位查詢已接通。主庫切換前已建立並實際還原驗證備份，原資料保留。過程見 [主庫切換驗證](docs/verification/measurement-point-cutover.md)。舊電表欄位仍保留供既有 API 相容，尚未移除。
 
 使用已有的 postgres:17 image，Compose 建立本專案獨立服務與 postgres-data volume。主機位址為 127.0.0.1:15433；不使用其他專案的 PostgreSQL 容器。
 
@@ -217,7 +218,7 @@ docker compose up -d --wait postgres
 .\.venv\Scripts\python.exe -m alembic current
 ```
 
-目前版本為 0001 (head)，建立 telemetry_readings 與 Alembic 的 alembic_version。Entity 在 storage/models.py，版本快照在 migrations/versions/；欄位規格見 [資料表規格](docs/storage/SCHEMA.md)。MQTT 接收端已寫入 telemetry_readings。
+目前版本為 0002 (head)，包含 telemetry_readings、devices、measurement_points、readings 四張業務表與 Alembic 的 alembic_version。Entity 在 storage/models.py，版本快照在 migrations/versions/；欄位規格見 [資料表規格](docs/storage/SCHEMA.md)。MQTT 接收端同交易寫入一份 telemetry_readings 與四筆 readings。
 
 本機示範帳號／密碼／資料庫為 iot_demo／iot_demo_local／iot_demo，僅供 localhost 開發。預設 URL 與 Compose 相同，其他環境以 DATABASE_URL 指定：
 
@@ -257,7 +258,7 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 
 ## 查詢設備最新量測
 
-先確認 PostgreSQL 已啟動且 migration 已套用。API 是獨立程序，不必為查詢另外啟動 receiver 或模擬器；它讀取已保存的資料。
+先確認 PostgreSQL 已啟動且 migration 已套用至 0002。API 是獨立程序，不必為查詢另外啟動 receiver 或模擬器；它讀取已保存的資料。
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
@@ -286,3 +287,31 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 - 查詢期間若有新增資料，offset 頁面可能位移，不保證跨請求固定快照。
 
 修改程式後需重啟未使用 reload 的 Uvicorn 才能看到新端點。規格見 [全設備歷史查詢](docs/api/HISTORY_TELEMETRY.md)。
+
+
+## 感測點入庫設定
+
+入庫函式要求設備與四個標準電表點位已設定。本機主庫已升到 0002，既有 meter-001 與四個點位已核對；新資料庫仍需先升版並初始化設備。
+
+在已套用 0002 的開發／測試 DB，可明確初始化電表：
+
+```powershell
+.\.venv\Scripts\python.exe -m storage.device_setup --device-id meter-001
+```
+
+重跑保留既有點位 ID 與顯示名稱，不覆寫不相容單位／刻度或設備模型；不是接收時自動建立設備。此程序不執行 migration。
+
+receiver 繼續使用原指令與電表 v1 MQTT 契約。新資料同一交易寫入一份 telemetry_readings（包含 source_data）與四筆 readings；既有電表欄位暫時同步保存，供舊 API 相容使用，後續切換再移除。設定缺漏記 telemetry_rejected／device_configuration_error，不入庫，下一筆仍可處理；DB 系統故障的既有例外路徑不變，恢復機制未實作。
+
+詳見 [第 2 步入庫驗證](docs/verification/measurement-point-ingestion.md)。
+
+
+## 感測點查詢方式
+
+- GET /devices：先列出設備，不必先知道 ID。
+- GET /devices/{device_id}/points：選設備後列出點位名稱、單位、解析度與 point_id。
+- GET /points/{point_id}/readings：選點位後查看歷史。
+
+三支均支援 limit／offset（預設 100 筆、最多 1000）。新點位 API 的 value、resolution 以十進位字串回傳，避免轉浮點損失精度；一般查詢不回原始暫存器。舊電表 API 保留原回應。
+
+主 DB 已升到 0002，可使用新版 receiver 與 API 的原啟動指令。規格見 [點位 API](docs/api/POINT_READINGS.md)，實際驗證見 [第 3 步紀錄](docs/verification/measurement-point-api.md)。
