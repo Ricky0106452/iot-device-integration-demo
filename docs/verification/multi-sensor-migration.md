@@ -33,3 +33,13 @@
 - 新增測試只在 IOT_MIGRATION_TEST_DATABASE_URL 指向自建 okgo_points_check_ 測試庫時執行；不提供則跳過五項。一般 IOT_TEST_DATABASE_URL 不會啟用這些退版測試。兩者都不提供時，50 通過、20 跳過；只有一般 DB 設定時，65 通過、5 跳過（依目前配置）。
 - 新表名稱／點位顯示名稱等本身也可能包含有價值的設定；downgrade 仍會移除新表，執行前應備份。現有防護檢查的是可否保留量測／模型語意，不代表任意設定可完整退回舊版。
 - 後續支援非電表快照時不能假設一定可 downgrade 到固定電表結構；已知會損失來源／點位值的情境拒絕退版。
+
+## 後續：第一步 ORM 對齊完成（取代上述 metadata 未同步限制）
+
+已新增三個 Entity，並補上快照的兩個 nullable 欄位。migrations/env.py 既有的 TelemetryReading.metadata 現在包含 storage/models.py 中的四張表，無需額外註冊機制或修改初始 migration。
+
+新增三個方法：metadata 表／型別／主鍵／外鍵檢查、真實 DB 與 ORM metadata 比對、ORM 讀回回填的設備與點位值及 JSONB。全套 73 個方法在本次自建獨立測試庫通過，無跳過，3.261 秒；alembic check 顯示 No new upgrade operations detected。
+
+獨立測試庫已核對名稱並移除，主 iot_demo 仍為 0001，原快照一筆。尚未執行實際主庫升版，尚未修改 receiver／儲存函式／API；目前 checkout 的 Entity 要求新欄位，不能重啟應用連舊版主庫。舊版已執行的程序未被停止。
+
+下一步是入庫流程切換與設備／點位設定，不是再次建立 migration。後續才加入點位查詢及主庫搬移驗收。ORM 對齊完成不表示整個改版已部署。未提供任何 DB 測試連線時，依配置為 51 個通過、22 個跳過。

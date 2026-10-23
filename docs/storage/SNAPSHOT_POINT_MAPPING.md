@@ -100,4 +100,15 @@ model_code 與點位設定在有歷史資料後不得任意改變含義；來源
 
 ## 過渡 migration 實作進度
 
-0002 草稿只在獨立測試庫完成結構與舊資料回填驗證，實際結果與未完成限制見 [驗證紀錄](../verification/multi-sensor-migration.md)。新快照欄位先 nullable，快照到設備外鍵待接收端切換再收緊；Entity 與 metadata 尚未同步，不能現在直接 autogenerate 或把改版宣稱已部署。
+0002 草稿只在獨立測試庫完成結構與舊資料回填驗證，實際結果與未完成限制見 [驗證紀錄](../verification/multi-sensor-migration.md)。新快照欄位先 nullable，快照到設備外鍵待接收端切換再收緊；Entity 與 metadata 已於第一步同步並在獨立庫比對一致；接收／查詢尚未切換，不能把改版宣稱已部署。
+
+
+## 四步改版的第一步：Entity 已完成
+
+storage/models.py 已包含 TelemetryReading、Device、MeasurementPoint、PointReading。兩個快照過渡欄位保留 nullable；source_data 使用 JSONB(none_as_null=True)，使 Python None 明確存成 SQL NULL。
+
+Entity 明確定義 migration 0002 的主鍵、命名複合外鍵、唯一約束、解析度正值 CHECK 與點位／時間降冪索引。尚未加入 ORM relationship、自動建立設備、點位寫入或 API 新路由。
+
+在獨立測試庫升到 0002 後，全套 73 測試通過，Alembic check 無差異。另以 Entity 讀回 migration 回填的設備、點位、NUMERIC 值與 JSONB 快照，確認非僅欄位名稱相同。
+
+主庫仍是 0001；目前工作目錄的 Entity 需要 0002 欄位，暫不可重啟改版 receiver/API 連主庫。第二步仍需改寫入庫，避免對回填快照以新欄位 None 比較造成衝突，並在同交易新增四筆點位值。完成後續步驟才切換主庫。

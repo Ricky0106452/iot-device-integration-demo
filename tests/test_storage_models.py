@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from storage.database import create_db_engine
-from storage.models import TelemetryReading
+from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +41,22 @@ class StorageMetadataTests(unittest.TestCase):
         self.assertEqual(str(table.c.energy_wh.type), "BIGINT")
         self.assertTrue(table.c.acquired_at.type.timezone)
         self.assertTrue(table.c.received_at.type.timezone)
-        self.assertTrue(all(not column.nullable for column in table.columns))
+        self.assertTrue(all(not column.nullable for column in table.columns
+                            if column.name not in {"model_code", "source_data"}))
+        self.assertTrue(table.c.model_code.nullable)
+        self.assertTrue(table.c.source_data.nullable)
+
+
+    def test_point_entities_record_source_and_device_constraints(self):
+        tables = TelemetryReading.metadata.tables
+        self.assertEqual(set(tables), {"telemetry_readings", "devices", "measurement_points", "readings"})
+        self.assertEqual(str(MeasurementPoint.__table__.c.resolution.type), "NUMERIC")
+        self.assertIsNone(PointReading.__table__.c.value.type.scale)
+        self.assertEqual([column.name for column in PointReading.__table__.primary_key],
+                         ["point_id", "message_id"])
+        foreign_keys = {constraint.name for constraint in PointReading.__table__.foreign_key_constraints}
+        self.assertEqual(foreign_keys, {"fk_readings_point", "fk_readings_snapshot"})
+        self.assertEqual(str(TelemetryReading.__table__.c.source_data.type), "JSONB")
 
 
 @unittest.skipUnless(os.environ.get("IOT_TEST_DATABASE_URL"), "未設定專用資料庫測試連線")

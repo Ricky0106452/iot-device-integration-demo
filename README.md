@@ -137,7 +137,7 @@ docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/device
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過十五項一般資料庫測試；另外五項 migration 退版測試僅在明確指定獨立測試庫時執行。
+Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過十五項一般資料庫測試；另外七項 migration／ORM 測試僅在明確指定獨立測試庫時執行。
 
 | 測試檔案 | 方法數 | 驗證內容 |
 |---|---:|---|
@@ -149,12 +149,12 @@ Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要�
 | `tests/test_publish_once.py` | 3 | CLI 串接、識別碼追蹤與錯誤分流 |
 | `tests/test_receiver_models.py` | 10 | 接收模型、嚴格型別、欄位限制與設備解析度 |
 | `tests/test_receiver_subscribe.py` | 11 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
-| `tests/test_storage_models.py` | 5 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
+| `tests/test_storage_models.py` | 6 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
 | `tests/test_store_telemetry.py` | 4 | 單筆提交、重複保留首次時間、內容衝突與設備隔離 |
 | `tests/test_latest_telemetry.py` | 8 | 最新值排序、設備隔離、回應格式、歷史分頁、404 與 422 |
-| `tests/test_measurement_point_migration.py` | 5 | 僅在自建臨時庫驗證回填、來源約束、重跑與退版防護 |
+| `tests/test_measurement_point_migration.py` | 7 | 僅在自建臨時庫驗證回填、來源約束、重跑、退版防護與 ORM 對齊 |
 
-指定本專案 PostgreSQL 測試連線後，一般 DB 測試可執行 65 個方法，另外五項過渡 migration 測試預設跳過。兩種測試連線均指向已確認的獨立測試庫時，70 個方法全部通過；兩者都未指定時共 50 個通過、20 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
+指定本專案 PostgreSQL 測試連線後，一般 DB 測試可執行 66 個方法，另外七項過渡 migration／ORM 測試預設跳過。兩種測試連線均指向已確認的獨立測試庫時，73 個方法全部通過；兩者都未指定時共 51 個通過、22 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
 
 尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
 
@@ -205,7 +205,7 @@ DB 例外不會產生成功 log，目前沿既有 callback 錯誤路徑傳回主
 
 ## PostgreSQL 與 migration
 
-> 多感測點改版進行中：新增 0002 過渡 migration，僅在獨立測試庫驗證，使用者本機仍為 0001。ORM／接收／查詢尚未切換，請先不要在現有 DB 執行 upgrade head 或 autogenerate；詳細限制見 [過渡 migration 驗證](docs/verification/multi-sensor-migration.md)。下方原建表操作在完成切換前須依此限制使用。
+> 多感測點改版進行中：新增 0002 過渡 migration，僅在獨立測試庫驗證，使用者本機仍為 0001。ORM 已對齊 0002；接收／查詢尚未切換。主 DB 仍是 0001，改版程式不可重啟連主庫；請先不要在現有 DB 執行 upgrade head 或 autogenerate；詳細限制見 [過渡 migration 驗證](docs/verification/multi-sensor-migration.md)。下方原建表操作在完成切換前須依此限制使用。
 
 使用已有的 postgres:17 image，Compose 建立本專案獨立服務與 postgres-data volume。主機位址為 127.0.0.1:15433；不使用其他專案的 PostgreSQL 容器。
 

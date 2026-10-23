@@ -7,6 +7,10 @@ from uuid import UUID, uuid4
 
 from alembic import command
 from alembic.config import Config
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from sqlmodel import Session
+from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
@@ -74,6 +78,26 @@ class MeasurementPointMigrationTests(unittest.TestCase):
                                  value["value"])
                 self.assertEqual(value["acquired_at"], row["acquired_at"])
                 self.assertEqual(value["received_at"], row["received_at"])
+
+    def test_orm_metadata_matches_migrated_database(self):
+        context = MigrationContext.configure(self.connection, opts={"compare_type": True})
+        self.assertEqual(compare_metadata(context, TelemetryReading.metadata), [])
+
+    def test_orm_reads_backfilled_entities_and_json_snapshot(self):
+        with Session(bind=self.connection, join_transaction_mode="create_savepoint") as session:
+            device = session.get(Device, "migration-a")
+            self.assertEqual(device.model_code, "SIM-POWER-01")
+            point = self.connection.execute(text("""SELECT point_id FROM measurement_points
+                WHERE device_id='migration-a' AND code='voltage_v'""")).scalar_one()
+            mapped_point = session.get(MeasurementPoint, point)
+            self.assertEqual(mapped_point.resolution, Decimal("0.1"))
+            self.assertEqual(mapped_point.unit, "V")
+            value = session.get(PointReading, (point, self.ids[0]))
+            self.assertEqual(value.value, Decimal("230.1"))
+            snapshot = session.get(TelemetryReading, ("migration-a", self.ids[0]))
+            self.assertEqual(snapshot.source_data["raw_registers"], snapshot.raw_registers)
+            self.assertEqual(snapshot.model_code, "SIM-POWER-01")
+            self.assertEqual(value.acquired_at, snapshot.acquired_at)
 
     def test_repeated_upgrade_does_not_duplicate_backfill(self):
         command.upgrade(self.config, "head")
