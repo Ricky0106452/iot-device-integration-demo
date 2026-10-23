@@ -1,3 +1,6 @@
 pymodbus==3.16.1
 paho-mqtt==2.1.0
 pydantic==2.14.1
+sqlmodel==0.0.48
+psycopg[binary]==3.3.6
+alembic==1.20.1
