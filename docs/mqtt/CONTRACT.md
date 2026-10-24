@@ -96,7 +96,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 - 平台不以到達順序當採集順序；晚到資料不因年齡直接拒收。最新值 API 依 acquired_at DESC、message_id DESC 查詢；UUID 只作穩定排序，不代表相同時間內的採集先後。
 - 現行入庫使用唯一鍵 `(device_id, message_id)` 判斷來源快照，相同 ID／相同內容不重複寫入，並核對已保存點位值完整性；相同 ID／不同內容記衝突且不覆蓋原資料。
 - 首次必須先建立 Receiver 持久訂閱；之後停止／重啟可恢復 Broker 保留的待送與未確認訊息。Broker persistence=True，使用 volume；每客戶端待送上限為 1000、同時未確認最多 1 筆，不自動使離線工作階段到期。超量或工作階段遺失不保證補回，也不宣稱每筆 PUBACK 已同步落盤。
-- 不以 QoS 1 宣稱端到端不遺失，也不以改 QoS 2 取代資料庫去重。斷線緩衝上限、重連補傳、跨重啟保存與超限策略留待階段 6 定義及驗證。
+- 不以 QoS 1 宣稱端到端不遺失，也不以改 QoS 2 取代資料庫去重。Gateway 持續模式已加入 SQLite 佇列、容量淘汰與跨重啟補送；保存成功不代表 Broker 或 DB 成功，詳見 [離線補送](../verification/gateway-offline-buffer.md)。
 
 ## 7. 拒收與紀錄
 
@@ -239,7 +239,7 @@ docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/device
 
 publish_once 預設讀 127.0.0.1:1502、Unit ID 1，以 meter-001／gateway-001 發布至 127.0.0.1:1883。可用 --device-host、--device-port、--unit-id、--device-id、--gateway-id、--broker-host、--broker-port 覆寫；--read-timeout 預設 1 秒，--mqtt-timeout 預設 5 秒且上限 5 秒。完整參數可由 --help 查閱。
 
-MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整個 CLI 的總截止時間；使用 hostname 時，OS 的 DNS 解析也不保證受同一上限約束。等待 PUBACK 逾時記 publish_unconfirmed，不等於已知 Broker 沒收到。重新執行 CLI 是新採集，會建立新 ID；目前不自動重送舊訊息。
+MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整個 CLI 的總截止時間；使用 hostname 時，OS 的 DNS 解析也不保證受同一上限約束。等待 PUBACK 逾時記 publish_unconfirmed，不等於已知 Broker 沒收到。重新執行 publish_once 是新採集，會建立新 ID，且不自動重送舊訊息；gateway.poll 則保存量測並沿用原 ID 補送。
 
 receiver 支援 --broker-host、--broker-port、--mqtt-timeout、--client-id；取得 QoS 1 SUBACK 後才印 receiver_ready，但這不保證 DB 可用。DB 連線沿用 DATABASE_URL 或 storage/database.py 的本機預設，不自動 migration。DB 例外沿 callback 錯誤通道傳回主執行緒並結束，不記成入庫成功；沒有本地緩衝或 DB 重試；重啟後可恢復 Broker 保留的訊息，詳見 [Receiver 恢復驗證](../verification/receiver-recovery.md)。
 
@@ -248,6 +248,10 @@ Pydantic model 是接收端執行的驗證，JSON Schema／AsyncAPI 是對外介
 
 ### 持續發布模式
 
-`gateway.poll` 與 publish_once 共用連線與識別碼參數，另有 --interval，預設每輪完成後等待 5 秒。啟動後立即採集；單台設備循序執行，每輪建立／關閉各自的通訊連線。Ctrl+C 結束。
+`gateway.poll` 與 publish_once 共用設備／Broker 參數，另有 --interval、--outbox、--max-pending、--retry-interval。啟動立即採集，採集與 SQLite 保存完成後等待 interval 秒；獨立執行緒依入列順序補送，不讓 MQTT 等待阻塞新採集。
 
-設備或 Broker 的已分類通訊失敗不結束持續迴圈，等待後嘗試下一輪新採集；不重送舊訊息、不沿用前輪 message_id，不新增緩衝或補傳。receiver 仍是另一個程序，若已因 Broker／DB 故障結束，需要重新啟動。完整用法見 [設備規格](../DEVICE_SPEC.md#8-gateway-持續採集)。
+預設 data/<gateway-id>-outbox.sqlite3、容量 10000 筆、發布失敗等待 5 秒。取得成功 PUBACK 才從待送佇列移除；容量淘汰是明確例外，滿時移除最舊記錄並印 outbox_discarded 與實際丟棄筆數。telemetry_buffered 表示本地交易已提交，不代表已發布或入庫。
+
+重啟沿用同一檔案、原 topic 與完整訊息，包含 message_id 及 acquired_at。一次通訊逾時可能是確認遺失，仍會重送，由 Receiver／DB 去重。既有 Receiver 工作階段與 Broker 待送上限是另一段保障；本地 10000 筆不會提高 Broker 的 1000 筆待送上限，補送也不等於全部已入庫。
+
+設備已分類讀取失敗會等待下一輪，不產生假的待送量測。SQLite 寫入失敗使程序報錯退出；Ctrl+C 停止採集、等待當次發布結束，餘下待送資料留到下次啟動。Receiver 若因 Broker／DB 故障退出，仍需人工或部署工具重啟。完整操作與證據見 [Gateway 離線補送](../verification/gateway-offline-buffer.md)。

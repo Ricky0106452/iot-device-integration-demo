@@ -1,6 +1,6 @@
 # Gateway 持續採集驗證
 
-日期：2026-10-24。狀態：持續採集與發布已完成，simulator 動態值尚未實作。
+日期：2026-10-24。此為初版輪詢的歷史紀錄；動態 simulator 與本地持久補送已另行完成，現行流程見 [Gateway 離線補送](gateway-offline-buffer.md)。
 
 ## 行為
 

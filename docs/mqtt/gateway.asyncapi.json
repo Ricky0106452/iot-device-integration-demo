@@ -3,7 +3,7 @@
   "info": {
     "title": "IoT Integration Demo gateway telemetry API",
     "version": "1.0.0",
-    "description": "Gateway application perspective. One-shot acquisition and QoS 1 publication are implemented; platform validation is pending. Normative behavior: CONTRACT.md."
+    "description": "Gateway application perspective. One-shot diagnostics and continuous acquisition with a durable local outbox and QoS 1 replay are implemented. Normative behavior: CONTRACT.md."
   },
   "defaultContentType": "application/json",
   "servers": {

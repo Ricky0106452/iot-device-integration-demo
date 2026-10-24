@@ -63,7 +63,7 @@ docker compose up -d --force-recreate mosquitto
 - 工作階段未設定自動到期；更換 Client ID 會留下舊工作階段，需維運清理。首次訂閱前的發布不保證保留。
 - Receiver 尚未自動重連、重啟或在 DB 故障時退避重試；程序恢復仍需人工或部署工具。DB 持續故障時的處理另行設計。
 - persistence 每 30 秒自動保存並在正常關閉時保存；突然斷電仍可能遺失未落盤狀態。不要用本次正常重啟測試宣稱端到端零遺失。
-- Gateway 本地保存與補送仍待 ADR-0006 實作。本次不新增 RabbitMQ。
+- 本紀錄產生時 Gateway 本地保存尚未實作；現已完成，見 [Gateway 離線補送](gateway-offline-buffer.md)。未新增 RabbitMQ。
 
 ## 整條資料流驗證
 

@@ -14,3 +14,6 @@ __pycache__/
 .env.*
 !.env.example
 *.log
+
+# Gateway 本地待送資料
+/data/

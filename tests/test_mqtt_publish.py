@@ -48,6 +48,10 @@ class MqttPublishTests(unittest.TestCase):
         self.client.disconnect.assert_called_once()
         self.client.loop_stop.assert_called_once()
 
+    def test_replay_uses_saved_topic(self):
+        publish_telemetry(self.message, topic='original/saved/topic', client=self.client, timeout=0.01)
+        self.assertEqual(self.client.publish.call_args.args[0], 'original/saved/topic')
+
     def test_tcp_connection_failure_does_not_publish(self):
         self.client.connect.side_effect = ConnectionRefusedError("refused")
         self.assert_failure("broker_connection_failed")

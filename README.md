@@ -78,11 +78,13 @@ Receiver 預設以固定身分 `rx-demo-001` 建立持久訂閱；停止後重�
 .\.venv\Scripts\python.exe -m gateway.poll --interval 5
 ```
 
-Gateway 立即採集一輪，每輪完成後等 5 秒再繼續；保持這個終端執行，按 `Ctrl+C` 停止。間隔不含讀取與發布耗時，各輪不重疊。單輪設備／Broker 通訊失敗會記錄錯誤，等待後重新採集，不重送舊訊息。
+Gateway 立即採集一輪，每輪讀取並保存後等 5 秒再繼續，採集不重疊。量測先寫入本地 SQLite，再由獨立執行緒發布；Broker 離線時持續保存，恢復後補送。保持終端執行，按 `Ctrl+C` 停止，剩餘待送資料留到下次啟動。
 
-Gateway 收到 Broker 確認後印出 `publish_acknowledged`；receiver 提交 DB 交易後印出 `telemetry_stored`，兩者使用相同 `message_id`。每輪建立新訊息，即使兩輪量測值相同也會保存為新資料。
+`telemetry_buffered` 表示已保存本地，不代表已發布。Gateway 收到 Broker 確認後印出 `publish_acknowledged`；receiver 提交 DB 交易後印出 `telemetry_stored`，兩者使用相同 `message_id`。每輪建立新訊息，即使兩輪量測值相同也會保存為新資料。
 
-若只想採集一次，改用以下指令，不必同時啟動兩種模式：
+預設待送檔案為 `data/gateway-001-outbox.sqlite3`，最多 10,000 筆，滿時淘汰最舊資料並記錄筆數。重啟沿用同一檔案，不要讓兩個 Gateway 同時使用；此路徑不納入 Git。可用 `--outbox`、`--max-pending`、`--retry-interval` 調整，見 [離線補送](docs/verification/gateway-offline-buffer.md)。
+
+若只想採集一次，以下是直接發布的診斷模式，**不提供本地保存與補送**，不必與持續模式同時啟動：
 
 ```powershell
 .\.venv\Scripts\python.exe -m gateway.publish_once
@@ -141,14 +143,14 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-最近一次完整本機驗證為 **109 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收；本次使用新建臨時資料庫與 Broker，未使用展示資料。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
+最近一次完整本機驗證為 **126 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收；本次使用新建臨時資料庫與 Broker，未使用展示資料。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
 
 另外 7 個 migration／ORM 測試會執行升降版，必須使用新建的獨立測試庫。完整執行方式與既有套件提醒見 [migration 測試說明](docs/verification/multi-sensor-migration.md#重現完整測試)；不應在展示 DB 執行這組測試。持續模式驗證見 [Gateway 輪詢紀錄](docs/verification/gateway-polling.md)，既有完整資料流見 [切換與驗證紀錄](docs/verification/measurement-point-cutover.md)。
 
 ## 目前限制
 
 - 實際採集目前只有動態／固定模式的模擬電表，未驗證實體硬體。資料模型可表達不同的數值型感測點，但其他設備的通訊與接收模型仍需另行整合。
-- Gateway 的持續模式會在下一輪重新採集，但不緩衝或補傳失敗的舊訊息。Receiver 沒有自動重連；Broker 失聯或 DB 寫入例外仍使 Receiver 結束。重啟後可恢復持久工作階段中的待送／未確認訊息，受 Broker 的 1,000 筆待送上限與保留狀態限制；首次訂閱之前、超量或遺失工作階段的訊息不保證補回。
+- Gateway 持續模式可恢復同一 SQLite 中尚未確認且未被淘汰的訊息；本地寫入失敗會停止，不保證 Gateway 停機期間未採集或主機／磁碟損毀後的資料。Receiver 沒有自動重連；Broker 失聯或 DB 寫入例外仍使 Receiver 結束。重啟後可恢復持久工作階段中的待送／未確認訊息，受 Broker 的 1,000 筆待送上限與保留狀態限制；首次訂閱之前、超量或遺失工作階段的訊息不保證補回。
 - 設備設定與欄位驗證已實作，Topic／payload 身分對應及 raw 與換算值一致性等完整契約檢查尚未完成。
 - 目前適用本機 Demo：Broker 匿名、無 TLS，已開啟磁碟持久化但不保證逐筆同步落盤，API 未加入身分驗證。使用中的示範帳密不適用對外環境。
 
@@ -156,6 +158,7 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 
 ## 相關文件
 
+- [Gateway 離線保存與補送](docs/verification/gateway-offline-buffer.md)
 - [設備規格與單次讀值除錯](docs/DEVICE_SPEC.md)
 - [MQTT 契約與通訊檢查](docs/mqtt/CONTRACT.md)
 - [資料結構與 migration 操作](docs/storage/SCHEMA.md)
