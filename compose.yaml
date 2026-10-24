@@ -7,6 +7,7 @@ services:
       - "127.0.0.1:1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
 
   postgres:
     image: postgres:17
@@ -25,4 +26,5 @@ services:
       retries: 10
 
 volumes:
+  mosquitto-data:
   postgres-data:

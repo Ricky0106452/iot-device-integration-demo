@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import re
 import sys
 from threading import Event
-from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 from pydantic import ValidationError
@@ -73,11 +73,13 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> 
     connected, subscribed, stopped = Event(), Event(), Event()
     connection_rejected = False
     subscription_accepted = False
+    session_present = False
     callback_errors = []
     client.connect_timeout = timeout
 
     def on_connect(client, userdata, flags, reason_code, properties):
-        nonlocal connection_rejected
+        nonlocal connection_rejected, session_present
+        session_present = bool(getattr(flags, "session_present", False))
         connection_rejected = reason_code.is_failure
         connected.set()
 
@@ -90,8 +92,15 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> 
         stopped.set()
 
     def on_message(client, userdata, message):
+        # 前一筆失敗後不再推進新訊息；未確認訊息留待重啟恢復。
+        if stopped.is_set():
+            return
         try:
             handle_message(message.topic, message.payload, store=store)
+            # store 回傳時交易已提交；已記錄的拒收也完成處置，不無限重送。
+            rc = client.ack(message.mid, message.qos)
+            if rc != mqtt.MQTT_ERR_SUCCESS:
+                raise ReceiverError("mqtt_ack_failed", f"無法送出訊息確認，rc={rc}")
         except Exception as exc:
             # 把非預期錯誤交回主執行緒拋出，不能讓背景執行緒死掉後假裝仍在接收。
             callback_errors.append(exc)
@@ -120,7 +129,7 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> 
         if not subscription_accepted:
             raise ReceiverError("subscription_rejected", "未獲授要求的 QoS 1")
         print(json.dumps({"event": "receiver_ready", "topic_filter": TOPIC_FILTER,
-                          "qos": 1}), flush=True)
+                          "qos": 1, "session_present": session_present}), flush=True)
         # 使用有期限的等待，讓主執行緒能定期處理 Ctrl+C。
         while not stopped.wait(0.2):
             pass
@@ -146,14 +155,18 @@ def main(argv=None) -> int:
     parser.add_argument("--broker-host", default="127.0.0.1")
     parser.add_argument("--broker-port", type=int, default=1883)
     parser.add_argument("--mqtt-timeout", type=float, default=5.0)
+    parser.add_argument("--client-id", default="rx-demo-001",
+                        help="持久訂閱身分；重啟沿用，不可由兩個實例同時使用")
     args = parser.parse_args(argv)
     if not 1 <= args.broker_port <= 65535:
         parser.error("Broker port 必須介於 1～65535")
     if not math.isfinite(args.mqtt_timeout) or not 0 < args.mqtt_timeout <= 5:
         parser.error("等待秒數必須大於 0 且不超過 5")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", args.client_id):
+        parser.error("Client ID 須為 1～64 個英數字、底線或連字號")
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"rx-{uuid4().hex[:20]}", clean_session=True,
+        client_id=args.client_id, clean_session=False, manual_ack=True,
         protocol=mqtt.MQTTv311, reconnect_on_failure=False,
     )
     engine = create_db_engine(os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL))

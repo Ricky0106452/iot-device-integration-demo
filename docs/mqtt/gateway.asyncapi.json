@@ -11,7 +11,7 @@
       "host": "127.0.0.1:1883",
       "protocol": "mqtt",
       "protocolVersion": "3.1.1",
-      "description": "Local development, anonymous, no TLS, Broker persistence disabled.",
+      "description": "Local development, anonymous, no TLS, Broker persistence enabled; not a per-message disk-sync guarantee.",
       "bindings": {
         "mqtt": {
           "cleanSession": true,

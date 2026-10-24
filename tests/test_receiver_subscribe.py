@@ -24,6 +24,7 @@ class ReceiverSubscribeTests(unittest.TestCase):
         )
         self.store = Mock(return_value="stored")
         self.client = Mock()
+        self.client.ack.return_value = mqtt.MQTT_ERR_SUCCESS
         self.client.connect.return_value = mqtt.MQTT_ERR_SUCCESS
         self.client.loop_start.return_value = mqtt.MQTT_ERR_SUCCESS
         self.client.loop_start.side_effect = lambda: self.client.on_connect(
@@ -129,7 +130,7 @@ class ReceiverSubscribeTests(unittest.TestCase):
         def subscribed_and_received(*args, **kwargs):
             self.client.on_subscribe(self.client, None, 1, [SimpleNamespace(value=1)], None)
             self.client.on_message(self.client, None, SimpleNamespace(
-                topic=TOPIC, payload=json.dumps(self.message).encode()))
+                topic=TOPIC, payload=json.dumps(self.message).encode(), mid=7, qos=1))
             self.client.on_disconnect(self.client, None, None, SimpleNamespace(), None)
             return mqtt.MQTT_ERR_SUCCESS, 1
         self.client.subscribe.side_effect = subscribed_and_received
@@ -186,6 +187,76 @@ class ReceiverSubscribeTests(unittest.TestCase):
         self.assertEqual(json.loads(output)["event"], "receiver_ready")
         self.assertEqual(json.loads(errors)["code"], "broker_disconnected")
         self.client.subscribe.assert_called_once_with("okgo/demo/v1/devices/+/telemetry", qos=1)
+
+
+class ReceiverAckTests(unittest.TestCase):
+    setUp = ReceiverSubscribeTests.setUp
+    capture_run = ReceiverSubscribeTests.capture_run
+    def deliver(self, *, payload=None, result='stored', failure=None, ack_result=mqtt.MQTT_ERR_SUCCESS):
+        self.store.return_value = result
+        self.store.side_effect = failure
+        self.client.ack.return_value = ack_result
+        order = []
+        if failure is None:
+            self.store.side_effect = lambda *a, **kw: order.append('store_completed') or result
+        self.client.ack.side_effect = lambda *a: order.append('ack') or ack_result
+        def subscribed(*args, **kwargs):
+            self.client.on_subscribe(self.client, None, 1, [SimpleNamespace(value=1)], None)
+            self.client.on_message(self.client, None, SimpleNamespace(
+                topic=TOPIC, payload=payload if payload is not None else json.dumps(self.message).encode(),
+                mid=9, qos=1))
+            self.client.on_disconnect(self.client, None, None, SimpleNamespace(), None)
+            return mqtt.MQTT_ERR_SUCCESS, 1
+        self.client.subscribe.side_effect = subscribed
+        return order
+
+    def test_ack_follows_store_or_duplicate_or_conflict_result(self):
+        for result in ['stored', 'duplicate', 'conflict']:
+            with self.subTest(result=result):
+                self.setUp()
+                order = self.deliver(result=result)
+                self.capture_run()
+                self.assertEqual(order, ['store_completed', 'ack'])
+                self.client.ack.assert_called_once_with(9, 1)
+
+    def test_invalid_message_is_acknowledged_after_rejection(self):
+        order = self.deliver(payload=b'{}')
+        _, _, errors = self.capture_run()
+        self.assertIn('invalid_payload', errors)
+        self.store.assert_not_called()
+        self.assertEqual(order, ['ack'])
+
+    def test_configuration_rejection_is_acknowledged(self):
+        self.deliver(failure=DeviceConfigurationError('not configured'))
+        _, _, errors = self.capture_run()
+        self.assertIn('device_configuration_error', errors)
+        self.client.ack.assert_called_once_with(9, 1)
+
+    def test_database_exception_does_not_ack(self):
+        self.deliver(failure=RuntimeError('DB unavailable'))
+        with self.assertRaisesRegex(RuntimeError, 'DB unavailable'):
+            self.capture_run()
+        self.client.ack.assert_not_called()
+        self.client.disconnect.assert_called_once()
+        self.client.loop_stop.assert_called_once()
+
+    def test_ack_failure_is_reported(self):
+        self.deliver(ack_result=mqtt.MQTT_ERR_NO_CONN)
+        code, _, errors = self.capture_run()
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(errors)['code'], 'mqtt_ack_failed')
+
+    def test_main_uses_persistent_identity_and_manual_ack(self):
+        from unittest.mock import patch
+        from receiver.subscribe import main
+        with patch('receiver.subscribe.mqtt.Client') as factory, \
+             patch('receiver.subscribe.create_db_engine') as engine, \
+             patch('receiver.subscribe.run_receiver', return_value=0):
+            self.assertEqual(main(['--client-id', 'rx-test-001']), 0)
+        self.assertEqual(factory.call_args.kwargs['client_id'], 'rx-test-001')
+        self.assertFalse(factory.call_args.kwargs['clean_session'])
+        self.assertTrue(factory.call_args.kwargs['manual_ack'])
+        engine.return_value.dispose.assert_called_once()
 
 
 if __name__ == "__main__":

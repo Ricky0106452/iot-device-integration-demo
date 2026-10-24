@@ -68,6 +68,10 @@ $env:DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:1543
 
 看到 `receiver_ready` 後再發布，並保持這個終端執行。它表示 MQTT 訂閱就緒；DB 寫入是否成功由後續處理結果判斷。
 
+Receiver 預設以固定身分 `rx-demo-001` 建立持久訂閱；停止後重啟可接續 Broker 保留的訊息。不要同時啟動兩個相同身分的 Receiver；需要指定身分時使用 `--client-id`，重啟仍須沿用。`session_present=true` 表示恢復了既有工作階段；首次連線為 false。
+
+若先前已啟動舊版 Broker，先執行 `docker compose up -d --force-recreate mosquitto`，套用持久化與 volume；這會中斷 MQTT 連線，需要重新啟動 Receiver。舊版未持久保存的資料不保證保留。
+
 ### 5. 持續採集並發布（終端 C）
 
 ```powershell
@@ -102,7 +106,7 @@ API 讀取已保存的資料；只查歷史時不需要模擬器或 receiver 持
 docker compose down
 ```
 
-`down` 會停止 Broker 與 PostgreSQL，保留資料庫 volume；不要加 `-v`，除非確定要刪除資料。
+`down` 會停止 Broker 與 PostgreSQL，保留資料庫與 Broker volume；不要加 `-v`，除非確定要刪除資料。
 
 ## API
 
@@ -137,16 +141,16 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-最近一次含資料庫的完整本機驗證為 **94 個測試通過**（加入動態模擬器前），涵蓋解析、訊息驗證、交易入庫、重複／衝突、API 與 migration。新增模擬器測試後，本次未設定 DB 的驗證為 **67 個通過、33 個跳過**；本次未重跑資料庫測試。
+最近一次完整本機驗證為 **109 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收；本次使用新建臨時資料庫與 Broker，未使用展示資料。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
 
 另外 7 個 migration／ORM 測試會執行升降版，必須使用新建的獨立測試庫。完整執行方式與既有套件提醒見 [migration 測試說明](docs/verification/multi-sensor-migration.md#重現完整測試)；不應在展示 DB 執行這組測試。持續模式驗證見 [Gateway 輪詢紀錄](docs/verification/gateway-polling.md)，既有完整資料流見 [切換與驗證紀錄](docs/verification/measurement-point-cutover.md)。
 
 ## 目前限制
 
 - 實際採集目前只有動態／固定模式的模擬電表，未驗證實體硬體。資料模型可表達不同的數值型感測點，但其他設備的通訊與接收模型仍需另行整合。
-- Gateway 的持續模式會在下一輪重新採集，但不緩衝或補傳失敗的舊訊息。receiver 沒有自動重連；Broker 失聯或 DB 寫入例外目前會使 receiver 結束，恢復後需重新啟動，未保存資料不保證能補回。
+- Gateway 的持續模式會在下一輪重新採集，但不緩衝或補傳失敗的舊訊息。Receiver 沒有自動重連；Broker 失聯或 DB 寫入例外仍使 Receiver 結束。重啟後可恢復持久工作階段中的待送／未確認訊息，受 Broker 的 1,000 筆待送上限與保留狀態限制；首次訂閱之前、超量或遺失工作階段的訊息不保證補回。
 - 設備設定與欄位驗證已實作，Topic／payload 身分對應及 raw 與換算值一致性等完整契約檢查尚未完成。
-- 目前適用本機 Demo：Broker 匿名、無 TLS、關閉訊息持久化，API 未加入身分驗證。使用中的示範帳密不適用對外環境。
+- 目前適用本機 Demo：Broker 匿名、無 TLS，已開啟磁碟持久化但不保證逐筆同步落盤，API 未加入身分驗證。使用中的示範帳密不適用對外環境。
 
 監測網頁、遠端設定、指定期間查詢與故障恢復等後續項目見 [ROADMAP](ROADMAP.md)。
 

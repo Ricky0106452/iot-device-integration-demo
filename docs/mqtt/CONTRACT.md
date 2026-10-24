@@ -76,7 +76,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 |---|---|
 | 連線 | 本機 `127.0.0.1:1883`；匿名、無 TLS，僅本機開發 |
 | MQTT | 3.1.1，keepalive 30 秒 |
-| session | 本階段 `clean_session=True`；client ID 每個同時連線程序唯一，不使用設備 ID 共用連線識別 |
+| session | Gateway 使用 clean_session=True；Receiver 使用 clean_session=False、固定 Client ID（預設 rx-demo-001），重啟恢復原工作階段。同一身分不可同時由兩個實例使用 |
 | 發布 QoS | 1；需要 Broker 確認，接受可能重複 |
 | 訂閱 QoS | 1；等待 SUBACK 並確認獲授 QoS 1 後才宣告接收端就緒 |
 | retain | 發布固定 False；量測是逐筆事件，不用 retained message 冒充歷史儲存或最新資料 API |
@@ -84,7 +84,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 發布端等待 CONNACK 成功後才送；`publish()` 回傳成功只表示 client 接受操作，收到 QoS 1 PUBACK 才記 `publish_acknowledged`。PUBACK 不代表平台收到、驗證、寫入資料庫或已持久保存。
 
-接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。MQTT ACK 是協定層行為，不是業務成功回應；目前沒有業務回執 Topic。
+接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。Receiver 使用手動 ACK：有效訊息在交易提交／確認相同重送後才確認；已記錄的格式、設備設定拒收與內容衝突也確認，避免無限重送。DB／非預期例外不確認並結束程序，重啟後由持久工作階段重新投遞。MQTT ACK 不是對發布者的業務成功回應；目前沒有業務回執 Topic。
 
 接收端遇到 `message.retain=True` 的 retained 回放視為契約違反，記錄並忽略。MQTT 3.1.1 對既有訂閱轉送的 live 訊息可能清除 RETAIN flag，因此此檢查不能證明發布端從未使用 retain；仍須由發布端設定及測試保證。
 
@@ -95,7 +95,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 - 等待 PUBACK 超時表示結果未確認，不能斷言 Broker 沒收到；若後續重送，沿用原訊息。
 - 平台不以到達順序當採集順序；晚到資料不因年齡直接拒收。最新值 API 依 acquired_at DESC、message_id DESC 查詢；UUID 只作穩定排序，不代表相同時間內的採集先後。
 - 現行入庫使用唯一鍵 `(device_id, message_id)` 判斷來源快照，相同 ID／相同內容不重複寫入，並核對已保存點位值完整性；相同 ID／不同內容記衝突且不覆蓋原資料。
-- 階段 2 先實作可重現的單筆發布／持續接收，接收端須先啟動。兩端 clean session，加上目前 Broker persistence=False，不保證訂閱端離線期間或程序／Broker 重啟後不遺失資料。
+- 首次必須先建立 Receiver 持久訂閱；之後停止／重啟可恢復 Broker 保留的待送與未確認訊息。Broker persistence=True，使用 volume；每客戶端待送上限為 1000、同時未確認最多 1 筆，不自動使離線工作階段到期。超量或工作階段遺失不保證補回，也不宣稱每筆 PUBACK 已同步落盤。
 - 不以 QoS 1 宣稱端到端不遺失，也不以改 QoS 2 取代資料庫去重。斷線緩衝上限、重連補傳、跨重啟保存與超限策略留待階段 6 定義及驗證。
 
 ## 7. 拒收與紀錄
@@ -241,7 +241,7 @@ publish_once 預設讀 127.0.0.1:1502、Unit ID 1，以 meter-001／gateway-001 
 
 MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整個 CLI 的總截止時間；使用 hostname 時，OS 的 DNS 解析也不保證受同一上限約束。等待 PUBACK 逾時記 publish_unconfirmed，不等於已知 Broker 沒收到。重新執行 CLI 是新採集，會建立新 ID；目前不自動重送舊訊息。
 
-receiver 支援 --broker-host、--broker-port、--mqtt-timeout；取得 QoS 1 SUBACK 後才印 receiver_ready，但這不保證 DB 可用。DB 連線沿用 DATABASE_URL 或 storage/database.py 的本機預設，不自動 migration。DB 例外沿 callback 錯誤通道傳回主執行緒並結束，不記成入庫成功；沒有緩衝、重試或恢復保證。
+receiver 支援 --broker-host、--broker-port、--mqtt-timeout、--client-id；取得 QoS 1 SUBACK 後才印 receiver_ready，但這不保證 DB 可用。DB 連線沿用 DATABASE_URL 或 storage/database.py 的本機預設，不自動 migration。DB 例外沿 callback 錯誤通道傳回主執行緒並結束，不記成入庫成功；沒有本地緩衝或 DB 重試；重啟後可恢復 Broker 保留的訊息，詳見 [Receiver 恢復驗證](../verification/receiver-recovery.md)。
 
 Pydantic model 是接收端執行的驗證，JSON Schema／AsyncAPI 是對外介面文件，接收端不讀 schema 檔。契約變更時需一起更新；目前沒有專用 schema 產生／同步工具，亦尚未使用正式 validator 完成文件規格驗證。
 
