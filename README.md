@@ -12,6 +12,8 @@
 
 目前可採集電壓、電流、功率與累積電量，在同一交易保存一份採集快照與四筆點位值。接收端會驗證訊息、略過相同資料重送；同 ID 內容不同時記錄衝突，不覆寫原資料。查詢端可先列出設備、選擇感測點，再查看歷史，不必預先知道 ID。
 
+完整元件分工、兩段 ACK 與故障時的保存位置，見 [系統架構與可靠傳輸圖](docs/ARCHITECTURE.md)。
+
 ## 快速開始
 
 前置條件：Python 3.12、Docker Engine 與 Docker Compose（使用 Linux containers）。以下以 Windows／PowerShell 為例，所有終端都從專案根目錄執行。本機驗證版本為 Python 3.12.14，Python 套件版本見 [requirements.txt](requirements.txt)。
