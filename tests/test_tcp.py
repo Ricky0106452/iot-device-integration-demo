@@ -19,7 +19,7 @@ class TcpReadTests(unittest.TestCase):
             probe.bind(("127.0.0.1", 0))
             cls.port = probe.getsockname()[1]
         cls.server = subprocess.Popen(
-            [sys.executable, "-u", "-m", "simulator.server", "--port", str(cls.port)],
+            [sys.executable, "-u", "-m", "simulator.server", "--fixed", "--port", str(cls.port)],
             cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )

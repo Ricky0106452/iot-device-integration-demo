@@ -56,7 +56,9 @@ $env:DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:1543
 .\.venv\Scripts\python.exe -m simulator.server
 ```
 
-保持這個終端執行；模擬器固定提供 `230.0 V`、`10.0 A`、`2300 W`、`70000 Wh`。
+保持這個終端執行；模擬器從 `230.0 V`、`10.0 A`、`2300 W`、`70000 Wh` 開始，每 5 秒自行更新電壓、電流與功率，並依實際經過時間累加電量。更新不依賴 Gateway 讀取；重啟會從初始值重新開始。
+
+需要固定值除錯時加上 `--fixed`；要改更新間隔可用 `--interval 2`。Simulator 的更新間隔與 Gateway 的採集間隔各自獨立。
 
 ### 4. 啟動接收端（終端 B）
 
@@ -74,7 +76,7 @@ $env:DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:1543
 
 Gateway 立即採集一輪，每輪完成後等 5 秒再繼續；保持這個終端執行，按 `Ctrl+C` 停止。間隔不含讀取與發布耗時，各輪不重疊。單輪設備／Broker 通訊失敗會記錄錯誤，等待後重新採集，不重送舊訊息。
 
-Gateway 收到 Broker 確認後印出 `publish_acknowledged`；receiver 提交 DB 交易後印出 `telemetry_stored`，兩者使用相同 `message_id`。每輪建立新訊息，即使固定模擬值相同也會保存為新資料。
+Gateway 收到 Broker 確認後印出 `publish_acknowledged`；receiver 提交 DB 交易後印出 `telemetry_stored`，兩者使用相同 `message_id`。每輪建立新訊息，即使兩輪量測值相同也會保存為新資料。
 
 若只想採集一次，改用以下指令，不必同時啟動兩種模式：
 
@@ -135,13 +137,13 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-最近一次完整本機驗證為 **94 個測試通過**，涵蓋解析、訊息驗證、交易入庫、重複／衝突、API 與 migration。未設定 DB 時為 61 個通過、33 個跳過；只設定一般測試 DB 時為 87 個通過、7 個跳過。
+最近一次含資料庫的完整本機驗證為 **94 個測試通過**（加入動態模擬器前），涵蓋解析、訊息驗證、交易入庫、重複／衝突、API 與 migration。新增模擬器測試後，本次未設定 DB 的驗證為 **67 個通過、33 個跳過**；本次未重跑資料庫測試。
 
 另外 7 個 migration／ORM 測試會執行升降版，必須使用新建的獨立測試庫。完整執行方式與既有套件提醒見 [migration 測試說明](docs/verification/multi-sensor-migration.md#重現完整測試)；不應在展示 DB 執行這組測試。持續模式驗證見 [Gateway 輪詢紀錄](docs/verification/gateway-polling.md)，既有完整資料流見 [切換與驗證紀錄](docs/verification/measurement-point-cutover.md)。
 
 ## 目前限制
 
-- 實際採集目前只有固定值的模擬電表，未驗證實體硬體。資料模型可表達不同的數值型感測點，但其他設備的通訊與接收模型仍需另行整合。
+- 實際採集目前只有動態／固定模式的模擬電表，未驗證實體硬體。資料模型可表達不同的數值型感測點，但其他設備的通訊與接收模型仍需另行整合。
 - Gateway 的持續模式會在下一輪重新採集，但不緩衝或補傳失敗的舊訊息。receiver 沒有自動重連；Broker 失聯或 DB 寫入例外目前會使 receiver 結束，恢復後需重新啟動，未保存資料不保證能補回。
 - 設備設定與欄位驗證已實作，Topic／payload 身分對應及 raw 與換算值一致性等完整契約檢查尚未完成。
 - 目前適用本機 Demo：Broker 匿名、無 TLS、關閉訊息持久化，API 未加入身分驗證。使用中的示範帳密不適用對外環境。
