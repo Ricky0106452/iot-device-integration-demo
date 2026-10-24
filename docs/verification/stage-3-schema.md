@@ -29,7 +29,7 @@
 
 ## 重現與邊界
 
-指令見 [README](../../README.md#postgresql-與-migration)，欄位見[資料表規格](../storage/SCHEMA.md)。
+指令見 [Migration 操作](../storage/SCHEMA.md#migration-操作)，欄位見[資料表規格](../storage/SCHEMA.md)。
 
 本紀錄當時的 create_all 不會更新現有表結構；目前已由 Alembic 接管版本，不能再照本紀錄的舊建表入口操作。唯一鍵只證明資料庫能拒絕重複，尚未實作正常重送略過、同 ID 不同內容衝突或接收成功後交易提交。
 

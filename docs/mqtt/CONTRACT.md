@@ -1,6 +1,10 @@
 # MQTT 量測契約 v1
 
-日期：2026-10-22。適用階段 2。狀態：契約、Gateway 單次採集／發布與獨立訂閱端接收已驗證；Python 訂閱與欄位驗證已接通，完整契約檢查與其餘故障案例尚未完成。
+日期：2026-10-22。本文件定義電表 v1 契約，同時保留當時的分階段實作紀錄。
+
+目前 Gateway 單次採集／發布、Pydantic 驗證、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
+
+本文的大小上限、重複 JSON key、Topic／payload 身分對應、Gateway 對應、raw 換算一致性與 retained 回放拒收等仍是目標規則，尚未全部實作；不能把文件中的「應／須」當成現有接收端已完成檢查。
 
 ## 1. 標準與專案約定的邊界
 
@@ -26,7 +30,7 @@ AsyncAPI 只描述契約，不會自動讓執行中的程式完成驗證。跨�
 | 發布 Topic | `okgo/demo/v1/devices/{device_id}/telemetry` |
 | 第一台設備 | `okgo/demo/v1/devices/meter-001/telemetry` |
 | 發布端 | Python Gateway；Simulator 僅提供 Modbus，不連 MQTT |
-| 訂閱端 | Python 平台；本階段先以獨立接收程序實作，尚不啟動 FastAPI |
+| 訂閱端 | 獨立 Python receiver；FastAPI 另行執行並查詢 DB，不負責訂閱 |
 | 訂閱 filter | `okgo/demo/v1/devices/+/telemetry`；`+` 只匹配一層設備 ID |
 | 資料含義 | 一次成功取得且可解析的完整五個 word 快照 |
 
@@ -34,7 +38,7 @@ AsyncAPI 只描述契約，不會自動讓執行中的程式完成驗證。跨�
 
 `device_id=meter-001` 為平台邏輯識別碼，不等於 Modbus Unit ID。Gateway 設定負責將它映射到 host、port、Unit ID；同樣的 Unit ID=1 可存在不同端點，不能只用 Unit ID 識別平台設備。`gateway_id=gateway-001` 是採集程序的穩定設定識別碼，跨重啟保持；不以 MQTT client ID 取代。
 
-此階段部署只設定第一台設備；平台接收前檢查設備及對應 Gateway 是否在設定清單內。這是資料路由檢查，不是發布者身分驗證：目前匿名 Broker 仍可能被本機其他程式偽造訊息。
+Demo 預設設備為 meter-001，須先明確初始化。現行 receiver 核對設備模型與四個點位設定，尚未檢查 Gateway 對應或 Topic 與 payload 身分一致性。設定核對不是發布者身分驗證：匿名 Broker 仍可能被本機其他程式偽造訊息。
 
 ## 3. Payload 與時間
 
@@ -52,7 +56,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 目前契約只適用 SIM-POWER-01，不因增加某欄位就宣稱支援其他設備模型。結構與範例以 schema 為準。
 
-平台另外記錄 `received_at`：平台收到該次訊息的 UTC 時間，屬平台處理紀錄，不由 Gateway 放進 payload。重送可能產生多次接收紀錄；未來資料庫的首次接收時間不應被重複訊息覆寫。
+平台另外記錄 `received_at`：平台收到該次訊息的 UTC 時間，屬平台處理紀錄，不由 Gateway 放進 payload。重送可能產生多次接收紀錄；資料庫保留首次接收時間，不因正常重送覆寫。
 
 `acquired_at` 不是設備採樣時間，也不是發布時間；重送不可刷新。兩台電腦時鐘可能有偏差，不以收到時間減取得時間直接宣稱精準網路延遲；時間格式可解析不代表時鐘準確。核心僅接受零 UTC offset，不接受無時區或非零 offset。
 
@@ -80,7 +84,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 發布端等待 CONNACK 成功後才送；`publish()` 回傳成功只表示 client 接受操作，收到 QoS 1 PUBACK 才記 `publish_acknowledged`。PUBACK 不代表平台收到、驗證、寫入資料庫或已持久保存。
 
-接收端先驗證，再記 `telemetry_received`（含 message_id、device_id、gateway_id、acquired_at、received_at）。非法訊息記 `telemetry_rejected` 與原因，跳過該筆並繼續接收。MQTT ACK 是協定層行為，不是我們的業務成功回應；本階段不新增業務回執 Topic。
+接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。MQTT ACK 是協定層行為，不是業務成功回應；目前沒有業務回執 Topic。
 
 接收端遇到 `message.retain=True` 的 retained 回放視為契約違反，記錄並忽略。MQTT 3.1.1 對既有訂閱轉送的 live 訊息可能清除 RETAIN flag，因此此檢查不能證明發布端從未使用 retain；仍須由發布端設定及測試保證。
 
@@ -89,8 +93,8 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 - 一次成功讀值對應一個 message_id。即使兩次數值完全相同，也生成不同 ID。
 - 同一次資料重送，整個 payload 保持不變，包括 ID、原始值與 acquired_at；不把 MQTT Packet Identifier 或 DUP flag 當業務去重依據。
 - 等待 PUBACK 超時表示結果未確認，不能斷言 Broker 沒收到；若後續重送，沿用原訊息。
-- 平台不以到達順序當採集順序；晚到資料不因年齡直接拒收。最新值更新與相同時間的處理於階段 3 明確實作。
-- 階段 2 允許同 ID 有多次接收 log，不宣稱已去重。階段 3 使用唯一鍵 `(device_id, message_id)`，相同 ID／相同內容不重複寫入；相同 ID／不同內容記衝突且不覆蓋原資料。
+- 平台不以到達順序當採集順序；晚到資料不因年齡直接拒收。最新值 API 依 acquired_at DESC、message_id DESC 查詢；UUID 只作穩定排序，不代表相同時間內的採集先後。
+- 現行入庫使用唯一鍵 `(device_id, message_id)` 判斷來源快照，相同 ID／相同內容不重複寫入，並核對已保存點位值完整性；相同 ID／不同內容記衝突且不覆蓋原資料。
 - 階段 2 先實作可重現的單筆發布／持續接收，接收端須先啟動。兩端 clean session，加上目前 Broker persistence=False，不保證訂閱端離線期間或程序／Broker 重啟後不遺失資料。
 - 不以 QoS 1 宣稱端到端不遺失，也不以改 QoS 2 取代資料庫去重。斷線緩衝上限、重連補傳、跨重啟保存與超限策略留待階段 6 定義及驗證。
 
@@ -106,7 +110,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 此核心先固定 v1 欄位，未知欄位拒收；欄位結構、型別、單位或含義變更先更新 schema、範例、AsyncAPI 及本文件，明確討論相容性。對外不相容變更使用新 Topic 主版本及 schema_version，不靜默改寫 v1；本核心不預先建立動態 schema registry。
 
-既有 gateway.read_once 的 stdout 是本機診斷輸出，尚非此契約；其中 numeric device_id 仍為 Modbus ID。後續新增 MQTT 發布流程時明確映射，不在這次文件工作中改寫原程式。
+`gateway.read_once` 的 stdout 是本機診斷輸出，不是 MQTT payload；其中數值型 device_id 是 Modbus ID。`gateway.publish_once` 已將它與字串型平台設備 ID 分開，數值 Unit ID 使用 --unit-id、邏輯設備 ID 使用 --device-id。
 
 ## 9. 待實作驗收
 
@@ -201,3 +205,42 @@ Then 前一筆記錄 telemetry_rejected，後一筆仍正常處理
 本切片只接 Paho 與既有欄位模型，不增加套件或儲存。Topic／設備映射、raw 一致性、重複 JSON key 與大小限制尚未加入，因此收到 telemetry_received 只表示目前欄位驗證通過，不代表完整契約或持久化成功。Broker 斷線時記錄並結束，不在此步增加自動重連。
 
 S2-03B 實際結果：訂閱 CLI、欄位驗證與拒收後繼續接收通過，42 項本機測試通過，並已用真實 Broker 驗證。見[訂閱驗證紀錄](../verification/stage-2-subscribe.md)。Topic／設備映射與 raw 一致性等尚未完成，不提前勾選完整驗收。
+
+
+## 11. 通訊除錯
+
+以下是完整 Demo 之外的獨立檢查工具；正常採集、入庫與查詢順序見 [README 快速開始](../../README.md#快速開始)。
+
+### Broker 收發檢查
+
+```powershell
+docker compose up -d mosquitto
+.\.venv\Scripts\python.exe scripts/mqtt_smoke.py
+docker compose logs --tail 30 mosquitto
+```
+
+腳本印出 PASS，代表兩個 Paho client 經 Broker 收發相同內容，並取得 QoS 1 確認。腳本先等 SUBACK，再發布到隨機 smoke Topic，結束時關閉兩個 client；它不讀設備、不寫資料庫。歷史驗證結果見 [Broker 檢查紀錄](../verification/stage-2-broker.md)。
+
+### 手動觀察量測 Topic
+
+```powershell
+docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/devices/+/telemetry' -q 1 -v -d
+```
+
+等工具收到 SUBACK 後，在模擬器與 Broker 運作時另開終端執行：
+
+```powershell
+.\.venv\Scripts\python.exe -m gateway.publish_once
+```
+
+-v 顯示 Topic 與 payload，-d 顯示協定 debug 訊息；PINGREQ／PINGRESP 是正常 keepalive。按 Ctrl+C 停止訂閱，省略 -d 可隱藏 debug 流量。mosquitto_sub 只觀察資料，不代替 receiver 的驗證與儲存。
+
+### Gateway 與 receiver 參數
+
+publish_once 預設讀 127.0.0.1:1502、Unit ID 1，以 meter-001／gateway-001 發布至 127.0.0.1:1883。可用 --device-host、--device-port、--unit-id、--device-id、--gateway-id、--broker-host、--broker-port 覆寫；--read-timeout 預設 1 秒，--mqtt-timeout 預設 5 秒且上限 5 秒。完整參數可由 --help 查閱。
+
+MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整個 CLI 的總截止時間；使用 hostname 時，OS 的 DNS 解析也不保證受同一上限約束。等待 PUBACK 逾時記 publish_unconfirmed，不等於已知 Broker 沒收到。重新執行 CLI 是新採集，會建立新 ID；目前不自動重送舊訊息。
+
+receiver 支援 --broker-host、--broker-port、--mqtt-timeout；取得 QoS 1 SUBACK 後才印 receiver_ready，但這不保證 DB 可用。DB 連線沿用 DATABASE_URL 或 storage/database.py 的本機預設，不自動 migration。DB 例外沿 callback 錯誤通道傳回主執行緒並結束，不記成入庫成功；沒有緩衝、重試或恢復保證。
+
+Pydantic model 是接收端執行的驗證，JSON Schema／AsyncAPI 是對外介面文件，接收端不讀 schema 檔。契約變更時需一起更新；目前沒有專用 schema 產生／同步工具，亦尚未使用正式 validator 完成文件規格驗證。

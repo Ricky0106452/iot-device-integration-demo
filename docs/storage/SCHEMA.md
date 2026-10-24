@@ -1,6 +1,72 @@
-# 第一版量測資料表
+# 資料結構與 migration
 
-日期：2026-10-23。此步驟只建立獨立 PostgreSQL 與資料表，不接 MQTT 入庫。
+## 目前結構
+
+程式的資料結構由 SQLModel Entity 定義，Alembic 目前的最新 revision 為 `0002`。接收端已接上交易入庫，API 可查詢設備、點位與歷史資料。
+
+| 表 | 用途與主要約束 |
+|---|---|
+| `devices` | 設備 ID、名稱與模型識別；`device_id` 為主鍵 |
+| `measurement_points` | 點位名稱、代碼、單位與解析度；同設備代碼唯一，解析度必須大於零 |
+| `telemetry_readings` | 一次採集的來源快照；主鍵為 `(device_id, message_id)`，保存來源時間、Gateway、版本與 JSONB 內容 |
+| `readings` | 每個感測點的歷史值；主鍵為 `(point_id, message_id)`，複合外鍵確保點位與來源快照屬於同設備 |
+| `alembic_version` | Alembic 管理的資料庫結構版本 |
+
+一筆電表訊息會在同一交易保存一份快照與四筆點位值。正常重送不重複新增、不刷新首次接收時間；同 ID 不同內容記衝突，原資料不變。
+
+`readings.value` 使用不指定固定 scale 的 NUMERIC；入庫前依設備模型檢查數值範圍與刻度。電表的電壓刻度為 0.1 V、電流為 0.01 A。時間欄位使用帶時區的 timestamp，保存取得時間與首次接收時間。
+
+目前快照仍保留原電表欄位以相容既有 API；`model_code`、`source_data` 在 DB 暫時允許 NULL，但新版電表入庫會填入。JSONB 保存已驗證的原始暫存器與解析結果，不是逐字封包原文。詳細欄位、外鍵與映射見 [快照與感測點規格](SNAPSHOT_POINT_MAPPING.md)，實際 Entity 見 [storage/models.py](../../storage/models.py)。
+
+## 環境與連線
+
+Docker Compose 提供 PostgreSQL 17，主機端點為 `127.0.0.1:15433`，使用 `postgres-data` volume。預設資料庫／帳號為 `iot_demo`，密碼 `iot_demo_local`，只供本機開發。其他環境在各執行終端設定 `DATABASE_URL`：
+
+```powershell
+$env:DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:15433/iot_demo'
+```
+
+receiver、API 與設備初始化不會自動執行 migration。首次啟動的完整順序見 [README 快速開始](../../README.md#快速開始)。
+
+## Migration 操作
+
+新資料庫或套用已有版本：
+
+```powershell
+docker compose up -d --wait postgres
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m alembic check
+```
+
+在已有資料的環境升版前先備份，必要時暫停寫入；不要以刪表或刪除 volume 取代 migration。`0002` 會將既有電表快照回填為設備、點位與歷史值，搬移驗證見 [主庫切換紀錄](../verification/measurement-point-cutover.md)。
+
+修改 Entity 的欄位、約束或索引後，先確認開發 DB 已到目前 head，再產生候選版本：
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "Describe schema change"
+# 檢查新版本的 upgrade、downgrade 及資料搬移內容後再執行
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic check
+```
+
+自動產生不保證辨識欄位改名或資料轉換，需人工檢查。已套用並提交的版本保持不變，後續變更新增 revision；沒有結構變更時不建立空版本。
+
+`stamp` 只記版本，不執行建表。只有人工核對結構相符的既有 DB 才使用它接軌；全新 DB 使用 `upgrade`。退版可能移除資料與設定，先檢查影響與備份；`0002` 會拒絕部分無法由舊電表欄位表示的退版情況。
+
+查看表與版本：
+
+```powershell
+docker compose exec -T postgres psql -U iot_demo -d iot_demo -c '\dt'
+docker compose exec -T postgres psql -U iot_demo -d iot_demo -c '\d telemetry_readings'
+.\.venv\Scripts\python.exe -m alembic current
+```
+
+訊息的 `schema_version` 與 DB 的 `alembic_version` 是不同概念。測試設定見 [README 測試](../../README.md#測試)，升降版測試須另用獨立測試庫，見 [完整測試說明](../verification/multi-sensor-migration.md#重現完整測試)。
+
+## 初版設計與驗收沿革
+
+以下保留初版建表、接收入庫與精度修正的階段紀錄；其中的「尚未實作」與版本／測試數描述屬於當時狀態。目前實作以本文開頭的結構與上述連結為準。
 
 ## S3-01：建立第一版資料表
 

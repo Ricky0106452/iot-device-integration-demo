@@ -36,7 +36,7 @@ stamp 不等於執行 migration；只有這次已核對結構的既有 DB 才採
 
 ## 邊界與操作
 
-日常流程見 [README](../../README.md#postgresql-與-migration)。修改 Entity 後 autogenerate 產生候選版本，人工檢查後才 upgrade；自動產生不保證正確辨識改名或資料轉換。資料庫結構版本與 payload 的 schema_version 是不同概念。
+日常流程見 [Migration 操作](../storage/SCHEMA.md#migration-操作)。修改 Entity 後 autogenerate 產生候選版本，人工檢查後才 upgrade；自動產生不保證正確辨識改名或資料轉換。資料庫結構版本與 payload 的 schema_version 是不同概念。
 
 這次未新增業務索引、MQTT 入庫或自動 migration 服務；版本變更由明確 CLI 操作。退版可能刪除資料，因此測試退版只在已確認為空的自建臨時 DB 執行。全部為本機結果，沒有遠端 CI。
 

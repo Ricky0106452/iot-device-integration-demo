@@ -1,6 +1,6 @@
 # ADR-0002：Python 與平台責任邊界
 
-日期：2026-10-22。狀態：選型已確認；Gateway 部分實作，平台與 FastAPI 尚未實作。
+日期：2026-10-22。狀態：選型已採用；Gateway 單次採集／發布、Python receiver 入庫與 FastAPI 查詢已實作。持續採集、遠端設定與事件處理仍是後續範圍。
 
 ## 問題
 
@@ -18,6 +18,6 @@
 
 單一後端語言降低跨語言契約與工具鏈成本，但程序間訊息相容性、故障處理與部署仍需驗證。此選擇不代表 Python 適合所有設備或平台。
 
-平台訂閱與 FastAPI 的生命週期需避免多 worker 重複啟動訂閱者；程序配置、資料庫工具及 API runtime 在相應階段另行定義，這份文件不宣稱它們已可運作。
+目前 receiver 與 FastAPI 為獨立程序，API 不啟動 MQTT 訂閱，避免每個 API worker 重複啟動訂閱者。儲存採 SQLModel／PostgreSQL，資料庫結構由 Alembic 管理。啟動與查詢方式見 [README](../../README.md)。
 
 參見 [實作階段](../../ROADMAP.md) 與 [MQTT 契約](../mqtt/CONTRACT.md)。

@@ -44,7 +44,7 @@ Adapter 測試涵蓋 Topic／payload／QoS／retain、TCP 失敗、CONNACK 逾�
 - Broker 不可用：broker_connection_failed、結束碼 1，stdout 無成功輸出。
 - 設備不可用：connection_failed、結束碼 1，沒有建立訊息 ID 或成功輸出。
 
-重現正常流程與訂閱工具指令見 [README](../../README.md#單次設備採集與-mqtt-發布)。
+正常啟動順序見 [README](../../README.md#快速開始)，手動訂閱指令見 [通訊除錯](../mqtt/CONTRACT.md#11-通訊除錯)。
 
 ## 驗證限制
 

@@ -1,317 +1,150 @@
 # IoT Device Integration Demo
 
-以 Python 實作的設備整合示範：透過 Modbus TCP 取得電力量測，逐步建立 MQTT 資料傳遞與平台處理流程。重點是設備資料語意、可重現測試與故障處理。
-
-本專案使用自行定義的模擬設備，尚未驗證實體硬體，也不代表任何廠商的官方產品。
-
-## 目前可執行的功能
-
-- 模擬器與 Gateway 分別執行，透過 Modbus TCP 讀取固定的五個暫存器。
-- 解析電壓、電流、有功功率與 UInt32 累積電量，保留原始值與 UTC 取得時間。
-- 連線／設備例外／解析失敗不產生假量測；可解析的偏高讀值仍保留。
-- Mosquitto 透過 Docker Compose 啟動，Paho smoke script 可驗證發布、訂閱與 QoS 1 確認。
-- 成功快照依契約組裝後，可由單次 CLI 透過 Paho 發布；保留取得時間與量測值，收到 QoS 1 PUBACK 才輸出發布已確認。
-- Python 接收端已接上 Paho 訂閱與 Pydantic 欄位驗證，合法資料記錄接收、非法資料記錄拒收後繼續等待；現有 JSON Schema 作為對外介面文件。
-- 已建立獨立 PostgreSQL 17 服務、Alembic 初始 migration 與單筆入庫函式（新增／重複／衝突）；MQTT 接收端已接上儲存函式，新增／重複／衝突與拒收後繼續處理已經真實 Broker 和 PostgreSQL 驗證。
-- 已驗證設備失聯不發布、Broker 不可用不記成功；透過獨立訂閱端核對真實發布訊息的資料 ID、時間與量測值。
-
-尚未完成：Topic／設備映射與 raw 一致性等完整接收驗證、持續輪詢、動態電量、設定寫入、指定期間歷史查詢、網頁及斷線補傳。Broker smoke 通過不代表設備到平台的完整資料流已完成。
-
-## 資料流與責任
-
-目前已實作：
+以 Python 實作的設備量測 Demo：Gateway 從模擬電表讀取 Modbus TCP 資料，透過 MQTT 傳給接收端，保存至 PostgreSQL，再由 FastAPI 提供設備、感測點與歷史查詢。
 
 ```text
-Modbus Simulator ──Modbus TCP──> Python Gateway ──MQTT──> Mosquitto
-                                                        ↓
-                                            Python receiver → PostgreSQL
-
-read_once 可單獨輸出讀值；publish_once 執行單次讀值與發布。
+模擬電表 → Modbus TCP → Python Gateway → MQTT／Mosquitto → Python Receiver
+                                                               ↓
+                                                          PostgreSQL
+                                                               ↑
+                                                          FastAPI → HTTP 查詢
 ```
 
-目標架構：
+目前可採集電壓、電流、功率與累積電量，在同一交易保存一份採集快照與四筆點位值。接收端會驗證訊息、略過相同資料重送；同 ID 內容不同時記錄衝突，不覆寫原資料。查詢端可先列出設備、選擇感測點，再查看歷史，不必預先知道 ID。
 
-```text
-模擬設備 ↔ Modbus TCP ↔ Python Gateway ↔ MQTT Broker ↔ Python 平台
-                                                       ├─ FastAPI ↔ 操作網頁
-                                                       └─ PostgreSQL
-```
+## 快速開始
 
-Gateway 負責設備通訊與解析；平台負責接收驗證、資料儲存、API 與事件處理。規劃與完成狀態見 [ROADMAP.md](ROADMAP.md)。
+前置條件：Python 3.12、Docker Engine 與 Docker Compose（使用 Linux containers）。以下以 Windows／PowerShell 為例，所有終端都從專案根目錄執行。本機驗證版本為 Python 3.12.14，Python 套件版本見 [requirements.txt](requirements.txt)。
 
-## 環境與安裝
+### 1. 安裝 Python 套件
 
-目前本機驗證環境為 Windows、Python 3.12.14、PyModbus 3.16.1、Paho MQTT 2.1.0、Pydantic 2.14.1。Broker 使用 Mosquitto 2.1.2 官方映像。其他 Python 版本與作業系統尚未形成測試矩陣。
-
-先安裝可用的 Python 3.12；Broker 檢查另需要可執行 Linux containers 的 Docker Engine 與 Compose。在專案根目錄執行：
+首次執行時建立虛擬環境；已有 `.venv` 可略過第一行。
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-以下指令以 PowerShell 為例，直接使用虛擬環境的 Python，無須啟用環境或修改 ExecutionPolicy。
-
-## 執行 Modbus 讀值
-
-開啟兩個終端，工作目錄皆為此 repository 根目錄。
-
-終端 A 啟動設備：
+### 2. 啟動 Broker、資料庫並初始化設備
 
 ```powershell
-.\.venv\Scripts\python.exe -m simulator.server
-```
-
-預設監聽 `127.0.0.1:1502`，Modbus Unit ID 為 1；按 Ctrl+C 停止。
-
-終端 B 讀取一次：
-
-```powershell
-.\.venv\Scripts\python.exe -m gateway.read_once
-```
-
-預期結果包含：
-
-```json
-{
-  "raw_registers": [2300, 1000, 2300, 1, 4464],
-  "measurement": {
-    "voltage_v": 230.0,
-    "current_a": 10.0,
-    "power_w": 2300,
-    "energy_wh": 70000
-  }
-}
-```
-
-成功輸出另外包含 `status`、數值型 Modbus `device_id` 與 UTC `acquired_at`。這是本機診斷格式；MQTT 訊息使用獨立的邏輯設備識別碼，詳見契約。
-
-停止設備後重讀，預期輸出 `connection_failed` 至 stderr，沒有量測輸出，結束碼為 1。取得時間來自 Gateway，不冒充設備內部採樣時間。
-
-## 啟動 Broker 與 MQTT 環境檢查
-
-```powershell
-docker compose up -d mosquitto
-docker compose ps
-.\.venv\Scripts\python.exe scripts/mqtt_smoke.py
-```
-
-預期腳本印出 `PASS`，表示兩個 Paho client 經 Broker 收發相同內容，QoS 1 發布已取得 Broker 確認。腳本會先等訂閱確認，再發布至隨機 smoke Topic；它不是設備量測上傳程式。
-
-主機連線位址為 `127.0.0.1:1883`。目前允許匿名、無 TLS、訊息持久化關閉，只適用本機開發。Compose 網路中的其他容器也能連入，不應視為正式存取控制。QoS 1 確認不代表平台處理或資料持久保存成功。
-
-查看 Broker log，或停止本專案全部服務（含 PostgreSQL，保留資料 volume）：
-
-```powershell
-docker compose logs --tail 30 mosquitto
-docker compose down
-```
-
-## 單次設備採集與 MQTT 發布
-
-先啟動 Broker 與模擬器，再於另一個終端訂閱量測 Topic：
-
-```powershell
-docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/devices/+/telemetry' -q 1 -v -d
-```
-
-等訂閱工具顯示收到 SUBACK 後，在第三個終端執行：
-
-```powershell
-.\.venv\Scripts\python.exe -m gateway.publish_once
-```
-
-預設從 `127.0.0.1:1502`、Unit ID 1 讀取，以邏輯設備 ID `meter-001`、Gateway ID `gateway-001` 發布到 `127.0.0.1:1883`。`--device-id` 是字串邏輯 ID；數值 Modbus ID 使用 `--unit-id`，與原 read_once 指令的參數含義不同。
-
-程式會依序讀值、建立訊息、JSON 序列化、連線並等待 CONNACK、發布 QoS 1（retain=False），最後等待 PUBACK。stderr 的 `telemetry_acquired` 與 stdout 的 `publish_acknowledged` 使用相同 message_id／acquired_at；訂閱端可核對該 ID 與四項量測。
-
-連線拒絕或確認逾時回傳非零；等待 PUBACK 逾時記 `publish_unconfirmed`，不宣稱 Broker 沒收到。設備失敗不建立量測訊息，也不呼叫發布。單次 CLI 沒有自動重連、重送、跨程序保存或本地緩衝；重新執行會重新讀值並建立新 ID。
-
-可用 `--device-port`、`--broker-port` 指定端點；`--read-timeout` 預設 1 秒，`--mqtt-timeout` 預設 5 秒且上限 5 秒。MQTT 設定涵蓋 socket 連線、CONNACK 與 PUBACK 的各自等待，不是整個 CLI 的總截止時間；使用 hostname 時作業系統 DNS 解析也不保證受相同上限約束。
-
-此訂閱工具只觀察訊息，不執行平台完整 schema／資料一致性驗證，也不保存到資料庫。實際結果見 [S2-02B 發布驗證](docs/verification/stage-2-publish-telemetry.md)。
-
-## 測試與證據
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
-Modbus 整合測試自行啟停模擬器並使用臨時本機 port；不需要先啟動 Broker。PostgreSQL 測試需另外提供 IOT_TEST_DATABASE_URL，未提供時跳過二十六項一般資料庫測試；另外七項 migration／ORM 測試僅在明確指定獨立測試庫時執行。
-
-| 測試檔案 | 方法數 | 驗證內容 |
-|---|---:|---|
-| `tests/test_decoding.py` | 6 | 倍率、字組順序、零值、偏高讀值與格式錯誤 |
-| `tests/test_tcp.py` | 3 | 獨立程序 TCP 讀值、唯讀／位址限制、連線失敗 |
-| `tests/test_publish_flow.py` | 3 | 失敗不發布、真實不可用端點、成功流程對照 |
-| `tests/test_telemetry.py` | 5 | 契約訊息組裝、UUID、原取得時間、資料隔離與 ID 格式 |
-| `tests/test_mqtt_publish.py` | 7 | QoS／retain、連線拒絕／逾時、PUBACK 確認與未確認結果 |
-| `tests/test_publish_once.py` | 3 | CLI 串接、識別碼追蹤與錯誤分流 |
-| `tests/test_receiver_models.py` | 10 | 接收模型、嚴格型別、欄位限制與設備解析度 |
-| `tests/test_receiver_subscribe.py` | 12 | 驗證後入庫、拒收不寫入、儲存結果與錯誤傳遞、MQTT 連線生命週期 |
-| `tests/test_storage_models.py` | 6 | Entity／migration 版本、升版保留資料、PostgreSQL 讀回與重複主鍵 |
-| `tests/test_store_telemetry.py` | 9 | 快照＋四點值提交、原子回滾、重複／衝突、設備設定與資料完整性 |
-| `tests/test_latest_telemetry.py` | 8 | 最新值排序、設備隔離、回應格式、歷史分頁、404 與 422 |
-| `tests/test_point_api.py` | 6 | 設備／點位探索、歷史排序／分頁、精度、404 與 422 |
-| `tests/test_measurement_point_migration.py` | 7 | 僅在自建臨時庫驗證回填、來源約束、重跑、退版防護與 ORM 對齊 |
-
-指定本專案 PostgreSQL 測試連線後，一般 DB 測試可執行 78 個方法，另外七項過渡 migration／ORM 測試預設跳過。兩種測試連線均指向已確認的獨立測試庫時，85 個方法全部通過；兩者都未指定時共 52 個通過、33 個跳過。沒有遠端 CI 結果。細節見 [固定讀值驗證](docs/verification/stage-1-fixed-read.md)、[Broker 檢查](docs/verification/stage-2-broker.md) 、[失敗不發布驗證](docs/verification/stage-2-no-publish-on-failure.md) 與 [訊息組裝驗證](docs/verification/stage-2-build-telemetry.md)。
-
-尚未驗證已建立 TCP 後設備不回覆的真正讀取逾時、斷線恢復與長時間運轉；不能由連線失敗測試推論這些行為。
-
-## 規格與設計文件
-
-- [設備規格](docs/DEVICE_SPEC.md)：暫存器配置與已實作／目標行為。
-- [MQTT 契約](docs/mqtt/CONTRACT.md)：Topic、欄位、時間語意及傳遞邊界。
-- [Gateway AsyncAPI](docs/mqtt/gateway.asyncapi.json)、[平台 AsyncAPI](docs/mqtt/platform.asyncapi.json)、[共用 JSON Schema](docs/mqtt/telemetry.schema.json)。
-- [ADR-0001：讀取失敗不補零](docs/decisions/0001-device-read-timeout.md)。
-- [ADR-0002：Python 與平台責任邊界](docs/decisions/0002-python-platform.md)。
-- [ADR-0003：保留可解析的量測值](docs/decisions/0003-preserve-measurement-values.md)。
-- [ADR-0004：資料儲存採用 SQLModel](docs/decisions/0004-sqlmodel-storage.md)；選型與首次建表已完成，接收入庫尚未實作。
-
-開發採規格與行為情境確認後實作，重要流程先寫測試；文件區分已驗證結果與後續規劃。AsyncAPI 與 schema 目前已做 JSON 語法及引用檢查，尚未使用正式 validator 完成規格驗證。
-
-## 接收模型與對外 schema
-
-接收端以 `receiver.models.Telemetry` 驗證資料，例如：
-
-```python
-from receiver.models import Telemetry
-
-model = Telemetry.model_validate_json(payload)
-print(model.device_id, model.measurement.voltage_v)
-```
-
-payload 是收到的 JSON 文字或 bytes；非法資料會拋出 Pydantic ValidationError。訂閱程式已處理模型錯誤並記錄拒收。模型檢查欄位，不代表已檢查 Topic 與 raw 換算一致性。 電壓只接受 0.1 V 刻度、電流只接受 0.01 A 刻度；超出解析度拒收，不讓 DB 四捨五入後造成重送誤判。
-
-JSON Schema 保留作為外部介接與 AsyncAPI 的格式文件；接收端直接用 Pydantic model 驗證，不讀取這份 schema。契約變更時才一起檢查並更新文件，目前不維護專用產生工具或自動同步測試。
-
-實作與驗證範圍見 [S2-03A 驗證紀錄](docs/verification/stage-2-receiver-model.md)。
-
-## 執行 Python 接收端
-
-先依下方 migration 步驟備妥 PostgreSQL、執行 storage.device_setup 初始化設備並啟動 Broker，再開一個終端執行：
-
-```powershell
-.\.venv\Scripts\python.exe -m receiver.subscribe
-```
-
-看到 receiver_ready 代表已取得 QoS 1 SUBACK；程式保持執行等待訊息。另一個終端在模擬器運作時執行 gateway.publish_once，接收端應在 DB commit 成功後印出 telemetry_stored，包含相同 message_id／acquired_at、received_at 與 stored_at；量測保存在 telemetry_readings，不再整包印出。相同內容重送印 telemetry_duplicate；同 ID 內容不同則記 telemetry_conflict 至 stderr，原資料不變。
-
-缺欄位或錯誤型別記錄 telemetry_rejected 至 stderr，下一筆仍可處理；非法 JSON 也不會直接中止接收。按 Ctrl+C 關閉。Broker 失聯則記錄錯誤並以非零結束，不自動重連。
-
-可用 --broker-host、--broker-port 指定 Broker；--mqtt-timeout 預設 5 秒（上限 5 秒），分別約束連線與啟動確認。儲存連線沿用 DATABASE_URL 或 storage/database.py 的本機示範預設；不在 receiver 啟動時自動執行 migration。receiver_ready 只表示 MQTT 訂閱完成，不保證 DB 可用。完整 Topic／raw 一致性檢查仍未完成。接入儲存的結果見 [MQTT 入庫驗證](docs/verification/stage-3-receiver-storage.md)；早期僅接收版本見 [訂閱驗證紀錄](docs/verification/stage-2-subscribe.md)。
-
-DB 例外不會產生成功 log，目前沿既有 callback 錯誤路徑傳回主執行緒並結束程式；這是目前實作限制，尚未實作可恢復的 DB 故障處理，不代表已完成正式故障策略。沒有緩衝、重試或補存保證。
-
-## PostgreSQL 與 migration
-
-> 四步資料庫改版已完成，本機資料庫為 0002，ORM、入庫與點位查詢已接通。主庫切換前已建立並實際還原驗證備份，原資料保留。過程見 [主庫切換驗證](docs/verification/measurement-point-cutover.md)。舊電表欄位仍保留供既有 API 相容，尚未移除。
-
-使用已有的 postgres:17 image，Compose 建立本專案獨立服務與 postgres-data volume。主機位址為 127.0.0.1:15433；不使用其他專案的 PostgreSQL 容器。
-
-新資料庫由第一份 migration 建表：
-
-```powershell
-docker compose up -d --wait postgres
+docker compose up -d --wait mosquitto postgres
 .\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m storage.device_setup --device-id meter-001
 ```
 
-目前版本為 0002 (head)，包含 telemetry_readings、devices、measurement_points、readings 四張業務表與 Alembic 的 alembic_version。Entity 在 storage/models.py，版本快照在 migrations/versions/；欄位規格見 [資料表規格](docs/storage/SCHEMA.md)。MQTT 接收端同交易寫入一份 telemetry_readings 與四筆 readings。
+初始化會建立 `meter-001` 與四個電表點位；重跑保留原有點位 ID 與名稱。必須先完成 migration 與設備初始化，receiver 才能入庫。
 
-本機示範帳號／密碼／資料庫為 iot_demo／iot_demo_local／iot_demo，僅供 localhost 開發。預設 URL 與 Compose 相同，其他環境以 DATABASE_URL 指定：
+預設連線位置：
+
+| 服務 | 位址 |
+|---|---|
+| 模擬電表 | `127.0.0.1:1502`，Modbus Unit ID `1` |
+| MQTT Broker | `127.0.0.1:1883` |
+| PostgreSQL | `127.0.0.1:15433` |
+| API | `127.0.0.1:8000` |
+
+資料庫預設名稱／帳號為 `iot_demo`，密碼為 `iot_demo_local`，僅供本機 Demo。使用其他資料庫時，在執行 migration、初始化、receiver 與 API 的終端分別設定：
 
 ```powershell
 $env:DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:15433/iot_demo'
 ```
 
-修改 Entity 的欄位、約束或索引後，產生 migration、檢查內容，再套用：
+### 3. 啟動模擬電表（終端 A）
 
 ```powershell
-.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "Describe schema change"
-# 檢查 migrations/versions/ 新產生的 upgrade 與 downgrade
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m alembic check
+.\.venv\Scripts\python.exe -m simulator.server
 ```
 
-執行 autogenerate 前 DB 應已升到目前 head。它產生候選變更，不保證理解欄位改名或資料搬移；需人工檢查。已提交且套用的版本不隨 Entity 改寫，後續變更新增 migration。沒有結構變更時不建立空版本。
+保持這個終端執行；模擬器固定提供 `230.0 V`、`10.0 A`、`2300 W`、`70000 Wh`。
 
-原本由 create_all 建立的本機表，已核對與初始 migration 一致後 stamp 0001；沒有刪表或重建 volume。stamp 只記錄版本，不執行建表，因此新 DB 應使用 upgrade，不能用 stamp 假裝建表完成。原 storage.init_db 入口已移除。
-
-查看表與版本：
+### 4. 啟動接收端（終端 B）
 
 ```powershell
-docker compose exec postgres psql -U iot_demo -d iot_demo -c '\d telemetry_readings'
-.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m receiver.subscribe
 ```
 
-執行 PostgreSQL 測試時指定開發／測試資料庫，不使用正式服務：
+看到 `receiver_ready` 後再發布，並保持這個終端執行。它表示 MQTT 訂閱就緒；DB 寫入是否成功由後續處理結果判斷。
+
+### 5. 採集並發布一次（終端 C）
 
 ```powershell
-$env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:15433/iot_demo'
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m gateway.publish_once
 ```
 
-測試同樣透過 migration 建立／升版量測表。一般讀寫測試回滾；升版保留資料測試會提交自己建立的隨機資料，結束時只刪除該筆。新資料庫升版、測試庫退版再升版與既有表接軌證據見 [migration 驗證紀錄](docs/verification/stage-3-migrations.md)。單筆儲存函式已接入 MQTT receiver，去重／衝突處理已驗證；最新量測與全設備分頁歷史 API 已完成，指定期間篩選尚未實作。見 [單筆入庫驗證](docs/verification/stage-3-store-telemetry.md)。
+Gateway 收到 Broker 確認後印出 `publish_acknowledged`；receiver 提交 DB 交易後印出 `telemetry_stored`，兩者使用相同 `message_id`。執行一次就採集一筆；再次執行會建立新訊息，即使量測值相同也會保存為新資料。
 
-
-## 查詢設備最新量測
-
-先確認 PostgreSQL 已啟動且 migration 已套用至 0002。API 是獨立程序，不必為查詢另外啟動 receiver 或模擬器；它讀取已保存的資料。
+### 6. 啟動 API 並查詢（終端 C 或另一個終端）
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-啟動後開啟：
+開啟 [Swagger UI](http://127.0.0.1:8000/docs)，或從 [設備清單](http://127.0.0.1:8000/devices) 開始，依序查設備的點位與點位歷史。也可直接看 [所有電表採集快照](http://127.0.0.1:8000/telemetry)。API 沒有首頁路由，開啟 `/` 會回傳 `404`。
 
-- 最新值：http://127.0.0.1:8000/devices/meter-001/telemetry/latest
-- Swagger UI：http://127.0.0.1:8000/docs
+API 讀取已保存的資料；只查歷史時不需要模擬器或 receiver 持續執行。
 
-按 Ctrl+C 停止。資料庫連線沿用 DATABASE_URL 或本機示範預設，不自動建表或執行 migration。
+### 停止服務
 
-成功回傳 200，包含取得／接收時間、原始暫存器與巢狀 measurement；未找到量測回傳 404，不合法的設備 ID 回傳 422。最新值依 acquired_at DESC、message_id DESC 取一筆，不以到達順序判斷。同時間的 UUID 排序只提供穩定結果，不代表採集先後。全設備歷史查詢見下方；未新增索引或 migration；不宣稱已驗證大量資料效能。
-
-規格見 [最新量測 API](docs/api/LATEST_TELEMETRY.md)，驗證見 [API 驗證紀錄](docs/verification/stage-3-latest-api.md)。目前 Starlette 1.9.0 的 TestClient 對 HTTPX 發出淘汰提醒，現有測試仍通過；本次保留已確認的組合，未另外安裝 HTTPX2 或更換版本。
-
-
-## 查詢所有設備的歷史量測
-
-不需要知道設備 ID，直接開啟 http://127.0.0.1:8000/telemetry 。回傳量測陣列，每筆都包含 device_id。
-
-- 預設最新 100 筆，依 acquired_at DESC、device_id ASC、message_id DESC 排序。
-- limit 介於 1～1000，offset 至少為 0。例如 /telemetry?limit=100&offset=100 查下一頁。
-- 空頁回傳 200 與 []；參數不合法回傳 422。
-- 這是可翻頁的全設備歷史查詢，不一次載入無限資料；尚未加入設備／期間篩選或總筆數查詢。
-- 查詢期間若有新增資料，offset 頁面可能位移，不保證跨請求固定快照。
-
-修改程式後需重啟未使用 reload 的 Uvicorn 才能看到新端點。規格見 [全設備歷史查詢](docs/api/HISTORY_TELEMETRY.md)。
-
-
-## 感測點入庫設定
-
-入庫函式要求設備與四個標準電表點位已設定。本機主庫已升到 0002，既有 meter-001 與四個點位已核對；新資料庫仍需先升版並初始化設備。
-
-在已套用 0002 的開發／測試 DB，可明確初始化電表：
+在模擬器、receiver 與 API 的終端各按 `Ctrl+C`，再停止 Docker 服務：
 
 ```powershell
-.\.venv\Scripts\python.exe -m storage.device_setup --device-id meter-001
+docker compose down
 ```
 
-重跑保留既有點位 ID 與顯示名稱，不覆寫不相容單位／刻度或設備模型；不是接收時自動建立設備。此程序不執行 migration。
+`down` 會停止 Broker 與 PostgreSQL，保留資料庫 volume；不要加 `-v`，除非確定要刪除資料。
 
-receiver 繼續使用原指令與電表 v1 MQTT 契約。新資料同一交易寫入一份 telemetry_readings（包含 source_data）與四筆 readings；既有電表欄位暫時同步保存，供舊 API 相容使用，後續切換再移除。設定缺漏記 telemetry_rejected／device_configuration_error，不入庫，下一筆仍可處理；DB 系統故障的既有例外路徑不變，恢復機制未實作。
+## API
 
-詳見 [第 2 步入庫驗證](docs/verification/measurement-point-ingestion.md)。
+| 方法與路徑 | 用途 |
+|---|---|
+| `GET /devices` | 列出已設定的設備 |
+| `GET /devices/{device_id}/points` | 列出該設備的點位、名稱、單位與解析度 |
+| `GET /points/{point_id}/readings` | 查單一點位的歷史值 |
+| `GET /telemetry` | 查所有設備的電表採集快照 |
+| `GET /devices/{device_id}/telemetry/latest` | 查單台設備最新的電表快照 |
 
+清單與歷史查詢支援 `limit`、`offset`，預設 100 筆、每次最多 1000 筆。例如 `/telemetry?limit=100&offset=100` 取得下一頁。歷史量測依 `acquired_at` 由新到舊排序。
 
-## 感測點查詢方式
+點位 API 的 `value`、`resolution` 使用十進位字串，例如 `"230.1"`、`"0.1"`；電表快照 API 保留既有 JSON number 格式。詳細回應與錯誤規則見 [點位 API](docs/api/POINT_READINGS.md)、[快照歷史](docs/api/HISTORY_TELEMETRY.md)、[最新快照](docs/api/LATEST_TELEMETRY.md)。
 
-- GET /devices：先列出設備，不必先知道 ID。
-- GET /devices/{device_id}/points：選設備後列出點位名稱、單位、解析度與 point_id。
-- GET /points/{point_id}/readings：選點位後查看歷史。
+## 測試
 
-三支均支援 limit／offset（預設 100 筆、最多 1000）。新點位 API 的 value、resolution 以十進位字串回傳，避免轉浮點損失精度；一般查詢不回原始暫存器。舊電表 API 保留原回應。
+未設定測試資料庫時，執行以下指令：
 
-主 DB 已升到 0002，可使用新版 receiver 與 API 的原啟動指令。規格見 [點位 API](docs/api/POINT_READINGS.md)，實際驗證見 [第 3 步紀錄](docs/verification/measurement-point-api.md)。
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+未設定測試 DB 時，資料庫相關測試會跳過；Modbus 測試會自行啟停模擬器，使用臨時 port，不需要預先啟動 Demo 或 Broker。
+
+若要執行一般資料庫測試，先建立專用測試 DB（只需建立一次），不要指向保存展示資料或正式資料的 DB。測試會套用 migration 並建立、清理測試資料。
+
+```powershell
+docker compose up -d --wait postgres
+docker compose exec -T postgres createdb -U iot_demo iot_demo_test
+$env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:15433/iot_demo_test'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+最近一次完整本機驗證為 **85 個測試通過**，涵蓋解析、訊息驗證、交易入庫、重複／衝突、API 與 migration。未設定 DB 時為 52 個通過、33 個跳過；只設定一般測試 DB 時為 78 個通過、7 個跳過。
+
+另外 7 個 migration／ORM 測試會執行升降版，必須使用新建的獨立測試庫。完整執行方式與既有套件提醒見 [migration 測試說明](docs/verification/multi-sensor-migration.md#重現完整測試)；不應在展示 DB 執行這組測試。完整資料流的實際驗證見 [切換與驗證紀錄](docs/verification/measurement-point-cutover.md)。
+
+## 目前限制
+
+- 實際採集目前只有固定值的模擬電表，未驗證實體硬體。資料模型可表達不同的數值型感測點，但其他設備的通訊與接收模型仍需另行整合。
+- Gateway 為單次採集，尚無持續輪詢；receiver 沒有自動重連、緩衝或補傳。Broker 失聯或 DB 寫入例外目前會使 receiver 結束，未保存資料不保證能補回。
+- 設備設定與欄位驗證已實作，Topic／payload 身分對應及 raw 與換算值一致性等完整契約檢查尚未完成。
+- 目前適用本機 Demo：Broker 匿名、無 TLS、關閉訊息持久化，API 未加入身分驗證。使用中的示範帳密不適用對外環境。
+
+監測網頁、遠端設定、指定期間查詢與故障恢復等後續項目見 [ROADMAP](ROADMAP.md)。
+
+## 相關文件
+
+- [設備規格與單次讀值除錯](docs/DEVICE_SPEC.md)
+- [MQTT 契約與通訊檢查](docs/mqtt/CONTRACT.md)
+- [資料結構與 migration 操作](docs/storage/SCHEMA.md)
+- [感測點映射與儲存設計](docs/storage/SNAPSHOT_POINT_MAPPING.md)
+- [設備與點位 API](docs/api/POINT_READINGS.md)
+- [設計決策](docs/decisions/)與[後續規劃](ROADMAP.md)

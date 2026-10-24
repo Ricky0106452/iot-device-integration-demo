@@ -108,3 +108,24 @@ Host、Port、Device／Unit ID、輪詢間隔與逾時由設定提供，不寫�
 - [ ] 正常重啟延續計數器與設定，停止期間不計入推估用電。
 
 對應 [實作階段](../ROADMAP.md)。設備與讀取解析先於階段 1 完成；控制在階段 5、故障恢復在階段 6 驗證，不因規格定案提前實作整套系統。
+
+
+## 7. 單次讀值除錯
+
+只檢查 Modbus 與解析時，不需要 MQTT 或 PostgreSQL。在專案根目錄開兩個終端：
+
+```powershell
+# 終端 A：啟動模擬電表，保持執行
+.\.venv\Scripts\python.exe -m simulator.server
+```
+
+```powershell
+# 終端 B：讀取一次
+.\.venv\Scripts\python.exe -m gateway.read_once
+```
+
+正常結果包含 raw_registers=[2300, 1000, 2300, 1, 4464]，以及 230.0 V、10.0 A、2300 W、70000 Wh。此診斷輸出另有 status、數值型 Modbus device_id 與 UTC acquired_at，不是 MQTT payload。
+
+模擬器支援 --host、--port、--device-id，預設 127.0.0.1:1502、Unit ID 1；read_once 的參數為 --host、--port、--device-id、--timeout，預設讀取 timeout 1 秒。這裡的 --device-id 是數值 Unit ID；publish_once 的 --device-id 則是字串邏輯設備 ID，數值改用 --unit-id。
+
+在終端 A 按 Ctrl+C 停止設備，再執行 read_once，預期 stderr 出現 connection_failed、沒有假量測，結束碼為 1。此案例是連線失敗，不代表已驗證建立連線後的真正讀取逾時。完整採集→MQTT→DB 流程見 [README](../README.md#快速開始)。

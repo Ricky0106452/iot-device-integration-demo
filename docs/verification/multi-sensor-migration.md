@@ -1,6 +1,36 @@
 # 多感測點：過渡 migration 驗證
 
-狀態：0002 草稿已在獨立測試庫通過；尚未套用使用者 DB，尚未完成 ORM／receiver／API 切換。
+本文保留 0002 的獨立測試與 ORM 對齊過程。改版後的入庫、API 與主庫切換現已完成，現況見 [切換驗證](measurement-point-cutover.md)；下方階段紀錄中的版本、筆數與待辦是當時狀態。
+
+## 重現完整測試
+
+一般測試與 IOT_TEST_DATABASE_URL 用法見 [README 測試](../../README.md#測試)。若要執行包含升降版的完整測試，必須另外設定 IOT_MIGRATION_TEST_DATABASE_URL，使用新建、可丟棄的空 DB。測試程式會核對 current_database() 以 okgo_points_check_ 開頭，且會執行 downgrade base；不要指向展示或正式資料庫，也不要只為通過名稱檢查而重命名有資料的 DB。
+
+在專案根目錄、同一個 PowerShell 終端執行：
+
+```powershell
+docker compose up -d --wait postgres
+$migrationTestDb = 'okgo_points_check_' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+docker compose exec -T postgres createdb -U iot_demo $migrationTestDb
+if ($LASTEXITCODE -ne 0) { throw '請使用新建的空測試庫，不要重用既有資料庫' }
+$env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:15433/' + $migrationTestDb
+$env:IOT_MIGRATION_TEST_DATABASE_URL = $env:IOT_TEST_DATABASE_URL
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+測試會自行套用 migration，不必先啟動模擬器、Broker、receiver 或 API。一般資料庫測試會提交、回滾或清理自己建立的資料；migration 測試則在專用庫執行版本切換，不能以一般測試的清理方式推論它也適用有資料的 DB。
+
+確認不需保留這次測試庫後，可在同一終端清理；本段只針對上面新建的庫：
+
+```powershell
+if ($migrationTestDb -notmatch '^okgo_points_check_[0-9]+$') { throw '無法確認本次測試庫名稱，停止清理' }
+docker compose exec -T postgres dropdb -U iot_demo $migrationTestDb
+Remove-Item Env:IOT_TEST_DATABASE_URL, Env:IOT_MIGRATION_TEST_DATABASE_URL -ErrorAction SilentlyContinue
+```
+
+最新完整驗證紀錄為 [85 個方法通過](measurement-point-api.md)。只設定一般測試 DB 時，7 個 migration／ORM 方法跳過；未設定任何測試 DB 時，52 個通過、33 個跳過。未提供遠端 CI 結果。
+
+目前 Starlette 1.9.0 的 TestClient 對 HTTPX 發出淘汰提醒，既有測試仍通過；這是測試工具的維護事項，不影響 API 啟動方式。本次文件整理未變更套件。
 
 ## 結構與回填
 

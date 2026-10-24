@@ -1,6 +1,6 @@
 # 採集快照與感測點映射規格
 
-狀態：多感測點改版的實作規格草案；只有文件，尚未修改 Entity、migration、receiver 或 API。配合 [整體設計](MULTI_SENSOR_DESIGN.md) 閱讀。
+狀態：四步改版已完成，快照與點位值交易入庫、設備／點位查詢均已實作。本文保留設計與分步切換紀錄，早期「尚未實作／不可升版」是當時狀態；目前操作以 [README](../../README.md)、[資料結構](SCHEMA.md)與[切換驗證](../verification/measurement-point-cutover.md)為準。
 
 ## 1. telemetry_readings 的目標結構
 
