@@ -28,7 +28,7 @@ docker compose exec -T postgres dropdb -U iot_demo $migrationTestDb
 Remove-Item Env:IOT_TEST_DATABASE_URL, Env:IOT_MIGRATION_TEST_DATABASE_URL -ErrorAction SilentlyContinue
 ```
 
-最新完整驗證紀錄為 [85 個方法通過](measurement-point-api.md)。只設定一般測試 DB 時，7 個 migration／ORM 方法跳過；未設定任何測試 DB 時，52 個通過、33 個跳過。未提供遠端 CI 結果。
+最新完整驗證紀錄為 [94 個方法通過](gateway-polling.md)。只設定一般測試 DB 時，7 個 migration／ORM 方法跳過；未設定任何測試 DB 時，61 個通過、33 個跳過。未提供遠端 CI 結果。
 
 目前 Starlette 1.9.0 的 TestClient 對 HTTPX 發出淘汰提醒，既有測試仍通過；這是測試工具的維護事項，不影響 API 啟動方式。本次文件整理未變更套件。
 

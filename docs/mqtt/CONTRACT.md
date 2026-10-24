@@ -2,7 +2,7 @@
 
 日期：2026-10-22。本文件定義電表 v1 契約，同時保留當時的分階段實作紀錄。
 
-目前 Gateway 單次採集／發布、Pydantic 驗證、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
+目前 Gateway 單次／持續採集與發布、Pydantic 驗證、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
 
 本文的大小上限、重複 JSON key、Topic／payload 身分對應、Gateway 對應、raw 換算一致性與 retained 回放拒收等仍是目標規則，尚未全部實作；不能把文件中的「應／須」當成現有接收端已完成檢查。
 
@@ -244,3 +244,10 @@ MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整�
 receiver 支援 --broker-host、--broker-port、--mqtt-timeout；取得 QoS 1 SUBACK 後才印 receiver_ready，但這不保證 DB 可用。DB 連線沿用 DATABASE_URL 或 storage/database.py 的本機預設，不自動 migration。DB 例外沿 callback 錯誤通道傳回主執行緒並結束，不記成入庫成功；沒有緩衝、重試或恢復保證。
 
 Pydantic model 是接收端執行的驗證，JSON Schema／AsyncAPI 是對外介面文件，接收端不讀 schema 檔。契約變更時需一起更新；目前沒有專用 schema 產生／同步工具，亦尚未使用正式 validator 完成文件規格驗證。
+
+
+### 持續發布模式
+
+`gateway.poll` 與 publish_once 共用連線與識別碼參數，另有 --interval，預設每輪完成後等待 5 秒。啟動後立即採集；單台設備循序執行，每輪建立／關閉各自的通訊連線。Ctrl+C 結束。
+
+設備或 Broker 的已分類通訊失敗不結束持續迴圈，等待後嘗試下一輪新採集；不重送舊訊息、不沿用前輪 message_id，不新增緩衝或補傳。receiver 仍是另一個程序，若已因 Broker／DB 故障結束，需要重新啟動。完整用法見 [設備規格](../DEVICE_SPEC.md#8-gateway-持續採集)。

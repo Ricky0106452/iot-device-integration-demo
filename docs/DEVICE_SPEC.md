@@ -1,6 +1,6 @@
 # 模擬電力設備規格 v1
 
-- 狀態：單次固定讀值已實作；動態量測、輪詢、設定寫入與恢復行為為後續目標。驗證結果見[階段 1 紀錄](verification/stage-1-fixed-read.md)。
+- 狀態：固定讀值與 Gateway 持續輪詢已實作；simulator 動態量測、設定寫入與完整故障恢復為後續目標。驗證結果見[階段 1 紀錄](verification/stage-1-fixed-read.md)。
 - 日期：2026-10-21；資料保留規則於 2026-10-22 修訂。
 - 模型：SIM-POWER-01，單相、僅正向用電的可限功率模擬負載。
 - 此規格由專案自行定義，不代表真實廠商設備，也不作為真實節能成效的證據。
@@ -15,7 +15,7 @@
 | Device／Unit ID | 1 |
 | 暫存器類別 | Holding Registers |
 | 量測讀取 | 功能碼 03，起始位址 0，數量 5 |
-| 輪詢 | 每 5 秒嘗試一次，每台不重疊執行讀取 |
+| 輪詢 | 預設每輪完成後等待 5 秒再採集，不含該輪讀取／發布耗時；單台不重疊、不補跑 |
 | 讀取逾時 | 1 秒；單次失敗後等待下一次輪詢，不立即連續重試 |
 
 Host、Port、Device／Unit ID、輪詢間隔與逾時由設定提供，不寫死在解析程式。上述為本機示範值，不是所有設備的建議值。容器化時可用服務名稱取代本機位址。
@@ -129,3 +129,20 @@ Host、Port、Device／Unit ID、輪詢間隔與逾時由設定提供，不寫�
 模擬器支援 --host、--port、--device-id，預設 127.0.0.1:1502、Unit ID 1；read_once 的參數為 --host、--port、--device-id、--timeout，預設讀取 timeout 1 秒。這裡的 --device-id 是數值 Unit ID；publish_once 的 --device-id 則是字串邏輯設備 ID，數值改用 --unit-id。
 
 在終端 A 按 Ctrl+C 停止設備，再執行 read_once，預期 stderr 出現 connection_failed、沒有假量測，結束碼為 1。此案例是連線失敗，不代表已驗證建立連線後的真正讀取逾時。完整採集→MQTT→DB 流程見 [README](../README.md#快速開始)。
+
+
+## 8. Gateway 持續採集
+
+啟動模擬器與 receiver 後，另開終端執行：
+
+```powershell
+.\.venv\Scripts\python.exe -m gateway.poll --interval 5
+```
+
+第一輪立即執行，之後每輪結束才等待 interval 秒，間隔須為大於零的有限數。這是單台設備的循序採集，不建立重疊工作，也不補跑延遲的輪次。保留 gateway.publish_once 作為單次診斷。
+
+每輪成功讀取產生新 message_id 與 acquired_at。設備失聯、例外或解析失敗時不發布；Broker 失敗或 PUBACK 未確認時不記成功。已分類的單輪失敗會等待後進入新採集，不保留、重送或刷新失敗訊息。設備與 Broker 恢復後，下一輪重新建立連線；這不等於 receiver 自動恢復或斷線期間資料能補回。
+
+按 Ctrl+C 停止；若正在讀取／發布，沿原 finally 清理該輪通訊資源。非預期程式錯誤不吞掉，仍會結束程序。各輪沿用單次模式建立／關閉 Modbus 與 MQTT 連線，尚未改成常駐連線或多設備排程。
+
+詳細驗證見 [Gateway 輪詢](verification/gateway-polling.md)。simulator 目前仍回覆固定值；動態數值將另一步實作。
