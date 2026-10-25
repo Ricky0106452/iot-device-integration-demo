@@ -34,7 +34,7 @@ $env:IOT_RECOVERY_BROKER_PORT = '11883'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_receiver_recovery.py -v
 ```
 
-應為三項通過。測試自行使用隨機 Client ID 與設備 ID，清除自己的工作階段與資料；拒絕使用展示 Broker 的 1883。臨時 DB 仍必須另外清理。若要重現完整 109 項，再將 IOT_MIGRATION_TEST_DATABASE_URL 設為同一個新建臨時 DB，執行 unittest discover -s tests -v；不得改成展示 DB。
+目前此檔包含三項原有恢復驗證與一項 Topic 一致性驗證，應為四項通過。測試自行使用隨機 Client ID 與設備 ID，清除自己的工作階段與資料；拒絕使用展示 Broker 的 1883。臨時 DB 仍必須另外清理。若要重現完整 109 項，再將 IOT_MIGRATION_TEST_DATABASE_URL 設為同一個新建臨時 DB，執行 unittest discover -s tests -v；不得改成展示 DB。
 
 測試結束後，在建立上述資源的同一個終端清理：
 
@@ -74,3 +74,14 @@ docker compose up -d --force-recreate mosquitto
 - 停止 Receiver 後另發布兩筆，確認尚未入庫；沿用相同 Client ID 重啟，session_present=true，兩筆補收後為七份快照、二十八筆點位值。
 - 再發布一筆既有訊息，觀察 telemetry_duplicate，資料筆數維持七份／二十八筆。
 - 結束後清理本次子程序、臨時容器、volume 與 DB。此為額外流程驗證，不計入前述 109 個 unittest 方法。
+
+
+## Topic／payload 設備一致性（2026-10-25）
+
+Receiver 在入庫前精確核對完整 Topic 與 payload.device_id；路徑或身分不符時記 topic_device_mismatch、ACK 後略過，不自動改寫任何一方。
+
+- 單元測試涵蓋設備不一致、前後斜線、額外路徑、版本、大小寫與結尾換行，以及合法的非預設設備；拒收前不呼叫儲存，回呼仍確認訊息。
+- 真實 Broker＋臨時 PostgreSQL：發布 Topic 為另一個設備、payload 為已初始化設備的訊息，觀察拒收並確認零份快照／零筆點位值；同一 Receiver 接著接收合法訊息，成功保存一份快照／四筆點位值。測試 Broker 的 inflight=1，後續投遞也驗證前筆未阻塞消費。
+- 完整回歸為 131 個測試通過、無跳過；未設定外部環境時為 94 個通過、37 個跳過。新增案例沿用前述獨立 Broker／DB 的執行方式。
+- 臨時 Broker、volume、DB 與 Receiver 子程序均已清理，未寫入展示 DB 或停止展示 Broker。
+- 本次未加入 raw／measurement 一致性、認證授權或 CI；不把設備 ID 一致性當成發布者身分可信的證明。

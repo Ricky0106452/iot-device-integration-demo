@@ -77,8 +77,8 @@ sequenceDiagram
 
     opt Broker 已收到且投遞訊息
         B->>R: PUBLISH（QoS 1）
-        R->>R: Pydantic 欄位驗證
-        alt 格式錯誤
+        R->>R: Pydantic 欄位與 Topic 身分一致性驗證
+        alt 格式錯誤或 Topic 不一致
             R->>R: 記錄拒收
             R-->>B: PUBACK，避免無限重送
         else 欄位合法

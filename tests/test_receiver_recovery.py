@@ -179,3 +179,18 @@ class ReceiverRecoveryTests(unittest.TestCase):
         second = self.start()
         self.wait_event(second, 'telemetry_duplicate')
         self.assert_rows(1, 4)
+
+    def test_topic_mismatch_does_not_store_or_block_next_message(self):
+        receiver = self.start()
+        self.wait_event(receiver, 'receiver_ready')
+        publish_telemetry(self.payload, port=self.port,
+            topic='okgo/demo/v1/devices/another-device/telemetry')
+        rejected = self.wait_event(receiver, 'telemetry_rejected')
+        self.assertEqual(rejected['code'], 'topic_device_mismatch')
+        self.assertEqual(rejected['device_id'], self.device_id)
+        self.assert_rows(0, 0)
+        # 同一 Receiver 接著收到合法訊息；Broker 的 inflight=1 也驗證前筆已確認。
+        self.publish()
+        self.wait_event(receiver, 'telemetry_stored')
+        self.assertIsNone(receiver.poll())
+        self.assert_rows(1, 4)

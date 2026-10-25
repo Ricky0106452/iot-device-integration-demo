@@ -2,9 +2,9 @@
 
 日期：2026-10-22。本文件定義電表 v1 契約，同時保留當時的分階段實作紀錄。
 
-目前 Gateway 單次／持續採集與發布、Pydantic 驗證、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
+目前 Gateway 單次／持續採集與發布、Pydantic 驗證、Topic／payload 設備身分一致性、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
 
-本文的大小上限、重複 JSON key、Topic／payload 身分對應、Gateway 對應、raw 換算一致性與 retained 回放拒收等仍是目標規則，尚未全部實作；不能把文件中的「應／須」當成現有接收端已完成檢查。
+本文的大小上限、重複 JSON key、Gateway 對應、raw 換算一致性與 retained 回放拒收等仍是目標規則，尚未全部實作；不能把文件中的「應／須」當成現有接收端已完成檢查。
 
 ## 1. 標準與專案約定的邊界
 
@@ -38,7 +38,9 @@ AsyncAPI 只描述契約，不會自動讓執行中的程式完成驗證。跨�
 
 `device_id=meter-001` 為平台邏輯識別碼，不等於 Modbus Unit ID。Gateway 設定負責將它映射到 host、port、Unit ID；同樣的 Unit ID=1 可存在不同端點，不能只用 Unit ID 識別平台設備。`gateway_id=gateway-001` 是採集程序的穩定設定識別碼，跨重啟保持；不以 MQTT client ID 取代。
 
-Demo 預設設備為 meter-001，須先明確初始化。現行 receiver 核對設備模型與四個點位設定，尚未檢查 Gateway 對應或 Topic 與 payload 身分一致性。設定核對不是發布者身分驗證：匿名 Broker 仍可能被本機其他程式偽造訊息。
+Demo 預設設備為 meter-001，須先明確初始化。現行 receiver 核對設備模型與四個點位設定，已在入庫前精確核對完整 Topic 與 payload.device_id；Gateway／設備授權對應仍未實作。設定核對不是發布者身分驗證：匿名 Broker 仍可能被本機其他程式偽造訊息。
+
+Topic 驗證在 payload 欄位驗證成功後、呼叫儲存前進行。完整路徑須精確等於 `okgo/demo/v1/devices/{payload.device_id}/telemetry`；不修正大小寫、斜線、版本或設備 ID。不一致記 telemetry_rejected／topic_device_mismatch，包含實際 topic、expected_topic、device_id、message_id 與 received_at；不輸出完整 payload、不入庫。此為確定性的契約拒收，記錄後 ACK，接著處理後續訊息。此檢查不替代發布者認證與 Topic 授權。
 
 ## 3. Payload 與時間
 
@@ -84,7 +86,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 發布端等待 CONNACK 成功後才送；`publish()` 回傳成功只表示 client 接受操作，收到 QoS 1 PUBACK 才記 `publish_acknowledged`。PUBACK 不代表平台收到、驗證、寫入資料庫或已持久保存。
 
-接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。Receiver 使用手動 ACK：有效訊息在交易提交／確認相同重送後才確認；已記錄的格式、設備設定拒收與內容衝突也確認，避免無限重送。DB／非預期例外不確認並結束程序，重啟後由持久工作階段重新投遞。MQTT ACK 不是對發布者的業務成功回應；目前沒有業務回執 Topic。
+接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息、Topic 不一致或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。Receiver 使用手動 ACK：有效訊息在交易提交／確認相同重送後才確認；已記錄的格式、Topic 不一致、設備設定拒收與內容衝突也確認，避免無限重送。DB／非預期例外不確認並結束程序，重啟後由持久工作階段重新投遞。MQTT ACK 不是對發布者的業務成功回應；目前沒有業務回執 Topic。
 
 接收端遇到 `message.retain=True` 的 retained 回放視為契約違反，記錄並忽略。MQTT 3.1.1 對既有訂閱轉送的 live 訊息可能清除 RETAIN flag，因此此檢查不能證明發布端從未使用 retain；仍須由發布端設定及測試保證。
 

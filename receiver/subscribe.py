@@ -35,6 +35,17 @@ def handle_message(topic: str, payload: bytes, *, store) -> None:
             "field": list(error["loc"]),
         }, ensure_ascii=False), file=sys.stderr, flush=True)
         return
+    # 完整核對 Topic；不修正大小寫、前後斜線或設備 ID，避免錯誤歸屬。
+    expected_topic = f"okgo/demo/v1/devices/{model.device_id}/telemetry"
+    if topic != expected_topic:
+        print(json.dumps({
+            "event": "telemetry_rejected", "code": "topic_device_mismatch",
+            "topic": topic, "expected_topic": expected_topic,
+            "device_id": model.device_id, "message_id": model.message_id,
+            "received_at": received_at.isoformat(),
+            "reason": "Topic 與 payload 的設備身分或路徑不一致",
+        }, ensure_ascii=False), file=sys.stderr, flush=True)
+        return
     try:
         result = store(model, received_at=received_at)
     except DeviceConfigurationError as exc:

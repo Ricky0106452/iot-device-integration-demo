@@ -56,6 +56,38 @@ class ReceiverSubscribeTests(unittest.TestCase):
         self.assertLessEqual(before, datetime.fromisoformat(event["received_at"]))
         self.assertLessEqual(datetime.fromisoformat(event["received_at"]), after)
 
+    def test_topic_mismatch_is_rejected_before_storage(self):
+        wrong_topic = 'okgo/demo/v1/devices/meter-002/telemetry'
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
+            handle_message(wrong_topic, json.dumps(self.message).encode(), store=self.store)
+        self.store.assert_not_called()
+        self.assertEqual(output.getvalue(), '')
+        event = json.loads(errors.getvalue())
+        self.assertEqual(event['event'], 'telemetry_rejected')
+        self.assertEqual(event['code'], 'topic_device_mismatch')
+        self.assertEqual(event['topic'], wrong_topic)
+        self.assertEqual(event['device_id'], self.message['device_id'])
+        self.assertEqual(event['message_id'], self.message['message_id'])
+        self.assertEqual(event['expected_topic'], TOPIC)
+        self.assertNotIn('raw_registers', event)
+
+    def test_full_topic_is_checked_without_normalizing(self):
+        wrong_topics = [TOPIC + '/', '/' + TOPIC, TOPIC + '/extra', TOPIC + '\n',
+                        TOPIC.replace('/v1/', '/v2/'), TOPIC.replace('meter-001', 'meter-001-extra'),
+                        TOPIC.replace('okgo/demo', 'other/demo'), TOPIC.replace('meter-001', 'METER-001')]
+        for topic in wrong_topics:
+            with self.subTest(topic=topic), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                handle_message(topic, json.dumps(self.message).encode(), store=self.store)
+        self.store.assert_not_called()
+
+    def test_matching_nondefault_device_is_accepted(self):
+        self.message['device_id'] = 'ahu-02'
+        with redirect_stdout(io.StringIO()):
+            handle_message('okgo/demo/v1/devices/ahu-02/telemetry',
+                           json.dumps(self.message).encode(), store=self.store)
+        self.store.assert_called_once()
+        self.assertEqual(self.store.call_args.args[0].device_id, 'ahu-02')
+
     def test_missing_field_then_valid_message_continues(self):
         invalid = dict(self.message)
         del invalid["message_id"]
@@ -192,7 +224,7 @@ class ReceiverSubscribeTests(unittest.TestCase):
 class ReceiverAckTests(unittest.TestCase):
     setUp = ReceiverSubscribeTests.setUp
     capture_run = ReceiverSubscribeTests.capture_run
-    def deliver(self, *, payload=None, result='stored', failure=None, ack_result=mqtt.MQTT_ERR_SUCCESS):
+    def deliver(self, *, payload=None, result='stored', failure=None, ack_result=mqtt.MQTT_ERR_SUCCESS, topic=TOPIC):
         self.store.return_value = result
         self.store.side_effect = failure
         self.client.ack.return_value = ack_result
@@ -203,7 +235,7 @@ class ReceiverAckTests(unittest.TestCase):
         def subscribed(*args, **kwargs):
             self.client.on_subscribe(self.client, None, 1, [SimpleNamespace(value=1)], None)
             self.client.on_message(self.client, None, SimpleNamespace(
-                topic=TOPIC, payload=payload if payload is not None else json.dumps(self.message).encode(),
+                topic=topic, payload=payload if payload is not None else json.dumps(self.message).encode(),
                 mid=9, qos=1))
             self.client.on_disconnect(self.client, None, None, SimpleNamespace(), None)
             return mqtt.MQTT_ERR_SUCCESS, 1
@@ -218,6 +250,13 @@ class ReceiverAckTests(unittest.TestCase):
                 self.capture_run()
                 self.assertEqual(order, ['store_completed', 'ack'])
                 self.client.ack.assert_called_once_with(9, 1)
+
+    def test_topic_mismatch_is_acknowledged_without_storage(self):
+        self.deliver(topic='okgo/demo/v1/devices/meter-002/telemetry')
+        _, _, errors = self.capture_run()
+        self.assertIn('topic_device_mismatch', errors)
+        self.store.assert_not_called()
+        self.client.ack.assert_called_once_with(9, 1)
 
     def test_invalid_message_is_acknowledged_after_rejection(self):
         order = self.deliver(payload=b'{}')
