@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+from pathlib import Path
 import re
 import sys
 from threading import Event
@@ -77,10 +78,14 @@ class ReceiverError(Exception):
         self.code = code
 
 
-def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> int:
+def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, ready_file=None) -> int:
     """等待連線與訂閱確認後持續接收；結束時清理傳入的 client。"""
     if not math.isfinite(timeout) or not 0 < timeout <= 5:
         raise ValueError("等待秒數必須大於 0 且不超過 5")
+    ready_path = Path(ready_file) if ready_file is not None else None
+    if ready_path is not None:
+        # 容器重啟不可沿用前次的就緒標記；僅 SUBACK 通過後建立。
+        ready_path.unlink(missing_ok=True)
     connected, subscribed, stopped = Event(), Event(), Event()
     connection_rejected = False
     subscription_accepted = False
@@ -139,6 +144,8 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> 
             raise ReceiverError("subscription_timeout", "未在期限內取得 SUBACK")
         if not subscription_accepted:
             raise ReceiverError("subscription_rejected", "未獲授要求的 QoS 1")
+        if ready_path is not None:
+            ready_path.write_text("subscribed", encoding="utf-8")
         print(json.dumps({"event": "receiver_ready", "topic_filter": TOPIC_FILTER,
                           "qos": 1, "session_present": session_present}), flush=True)
         # 使用有期限的等待，讓主執行緒能定期處理 Ctrl+C。
@@ -156,9 +163,13 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0) -> 
         return 0
     finally:
         try:
-            client.disconnect()
+            if ready_path is not None:
+                ready_path.unlink(missing_ok=True)
         finally:
-            client.loop_stop()
+            try:
+                client.disconnect()
+            finally:
+                client.loop_stop()
 
 
 def main(argv=None) -> int:
@@ -168,6 +179,7 @@ def main(argv=None) -> int:
     parser.add_argument("--mqtt-timeout", type=float, default=5.0)
     parser.add_argument("--client-id", default="rx-demo-001",
                         help="持久訂閱身分；重啟沿用，不可由兩個實例同時使用")
+    parser.add_argument("--ready-file", help="訂閱成功後建立就緒檔案，供容器健康檢查")
     args = parser.parse_args(argv)
     if not 1 <= args.broker_port <= 65535:
         parser.error("Broker port 必須介於 1～65535")
@@ -184,7 +196,7 @@ def main(argv=None) -> int:
     try:
         return run_receiver(client, store=partial(store_telemetry, engine),
                             host=args.broker_host, port=args.broker_port,
-                            timeout=args.mqtt_timeout)
+                            timeout=args.mqtt_timeout, ready_file=args.ready_file)
     finally:
         engine.dispose()
 

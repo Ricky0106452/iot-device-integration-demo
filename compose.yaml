@@ -1,13 +1,28 @@
 name: okgo-demo
 
+x-app: &app
+  image: ${APP_IMAGE:-okgo-demo-app:local}
+  build: .
+  init: true
+  stop_signal: SIGINT
+  stop_grace_period: 30s
+
+x-database-env: &database-env
+  DATABASE_URL: postgresql+psycopg://iot_demo:iot_demo_local@postgres:5432/iot_demo
+
 services:
   mosquitto:
     image: eclipse-mosquitto:2.1.2-alpine
     ports:
-      - "127.0.0.1:1883:1883"
+      - "127.0.0.1:${MQTT_PORT:-1883}:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "127.0.0.1", "-t", "health/compose", "-n", "-q", "1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:17
@@ -16,7 +31,7 @@ services:
       POSTGRES_PASSWORD: iot_demo_local
       POSTGRES_DB: iot_demo
     ports:
-      - "127.0.0.1:15433:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-15433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +40,75 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    <<: *app
+    environment: *database-env
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  device-setup:
+    <<: *app
+    environment: *database-env
+    command: ["python", "-m", "storage.device_setup", "--device-id", "meter-001"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  simulator:
+    <<: *app
+    command: ["python", "-m", "simulator.server", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:${MODBUS_PORT:-1502}:1502"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 1502), timeout=1).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  receiver:
+    <<: *app
+    environment: *database-env
+    command: ["python", "-m", "receiver.subscribe", "--broker-host", "mosquitto", "--ready-file", "/tmp/receiver.ready"]
+    depends_on:
+      device-setup:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import sys; sys.exit(0 if Path('/tmp/receiver.ready').is_file() else 1)"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    <<: *app
+    command: ["python", "-m", "gateway.poll", "--device-host", "simulator", "--broker-host", "mosquitto", "--outbox", "/app/data/gateway-001-outbox.sqlite3"]
+    volumes:
+      - gateway-data:/app/data
+    depends_on:
+      simulator:
+        condition: service_healthy
+      receiver:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    environment: *database-env
+    command: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      device-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/devices', timeout=2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   mosquitto-data:
   postgres-data:
+  gateway-data:

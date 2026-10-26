@@ -1,6 +1,6 @@
 # 系統架構與可靠傳輸
 
-此圖對應目前已實作的本機 Demo。Simulator、Gateway、Receiver 與 FastAPI 是分開執行的 Python 程序；Mosquitto 與 PostgreSQL 由 Docker Compose 啟動。圖中的分組表示程序與部署方式，不代表已部署多台主機。
+預設由 Docker Compose 在單機啟動六個常駐服務：Simulator、Gateway、Mosquitto、Receiver、PostgreSQL 與 FastAPI。另有 migrate、device-setup 兩個一次性工作，依序完成資料庫升版與設備初始化；不是常駐 API。也保留主機 Python 的開發啟動方式。
 
 ## 整體架構
 
@@ -8,29 +8,25 @@
 
 ```mermaid
 flowchart LR
-    SIM["Simulator<br/>每 5 秒更新電表量測"]
-
-    subgraph GW["Gateway · Python 程序"]
-        ACQ["持續採集<br/>Modbus 讀取、解析、建立訊息"]
-        OUT[("SQLite 待送佇列<br/>先保存，重啟可恢復")]
-        SEND["獨立發布執行緒<br/>FIFO 補送、失敗等待重試"]
-        ACQ -->|交易保存| OUT
-        OUT -->|原 topic 與訊息| SEND
-    end
-
-    subgraph DOCKER["Docker Compose"]
-        MQTT["Mosquitto<br/>MQTT 轉送、持久工作階段"]
-        MSTORE[("mosquitto-data volume<br/>工作階段與待送訊息")]
-        PG[("PostgreSQL<br/>設備、點位、採集快照、點位歷史")]
+    subgraph STACK["Docker Compose · 單機"]
+        SIM["Simulator 容器<br/>每 5 秒更新電表量測"]
+        subgraph GW["Gateway 容器 · 一個 Python 程序"]
+            ACQ["持續採集<br/>Modbus 讀取、解析、建立訊息"]
+            OUT[("SQLite 待送佇列<br/>gateway-data volume")]
+            SEND["獨立發布執行緒<br/>FIFO 補送、失敗等待重試"]
+            ACQ -->|交易保存| OUT
+            OUT -->|原 topic 與訊息| SEND
+        end
+        MQTT["Mosquitto 容器<br/>轉送、持久工作階段"]
+        MSTORE[("mosquitto-data volume")]
+        RX["Receiver 容器<br/>欄位、raw 與 Topic 驗證<br/>入庫後手動 ACK"]
+        PG[("PostgreSQL 容器<br/>設備、點位、快照、歷史")]
         PSTORE[("postgres-data volume")]
+        API["FastAPI 容器<br/>設備、點位、最新與歷史查詢"]
         MQTT -->|持久化| MSTORE
         PG -->|資料儲存| PSTORE
     end
-
-    RX["Receiver · Python 程序<br/>Pydantic 與 raw 換算驗證、SQLModel 入庫<br/>入庫完成後手動 ACK"]
-    API["FastAPI · Python 程序<br/>設備、點位、最新與歷史查詢"]
     USER["使用者<br/>Swagger UI／HTTP client"]
-
     SIM -->|Modbus TCP／FC03／5 個 word| ACQ
     SEND -->|MQTT PUBLISH／QoS 1| MQTT
     MQTT -->|訂閱訊息／QoS 1| RX
@@ -38,10 +34,9 @@ flowchart LR
     PG -->|查詢結果| API
     USER -->|HTTP 查詢| API
     API -->|JSON 回應| USER
-
 ```
 
-SQLite 是 Gateway 的本地檔案，不是另一個服務，也不是 PostgreSQL 的替代品。Mosquitto 的保存負責尚待交付的訊息；長期歷史查詢使用 PostgreSQL。FastAPI 只查 DB，不在請求內採集設備或訂閱 MQTT。
+SQLite 是 Gateway 的待送檔案，容器模式保存在 gateway-data volume；本機模式預設存於 data/。SQLite 不是另一個服務，也不是 PostgreSQL 的替代品。Mosquitto 的保存負責尚待交付的訊息；長期歷史查詢使用 PostgreSQL。FastAPI 只查 DB，不在請求內採集設備或訂閱 MQTT。
 
 ## 可靠傳輸流程
 
@@ -113,3 +108,5 @@ Receiver 不會向 MQTT Broker 查詢任意歷史；它恢復原工作階段，�
 | Gateway 停機期間 | 重啟後繼續採集 | Simulator 沒有歷史補讀，未採集資料無法補造 |
 
 細節與實際故障驗證見 [Receiver 恢復](verification/receiver-recovery.md)、[Gateway 離線補送](verification/gateway-offline-buffer.md)，設計決策見 [ADR-0005](decisions/0005-receiver-recovery.md)、[ADR-0006](decisions/0006-gateway-offline-buffer.md)。
+
+Compose 啟動順序、一次性工作與健康檢查見 [部署說明](verification/compose-deployment.md)。健康檢查與啟動相依不等於故障後自動重啟；目前未設定 restart policy 或跨主機調度。

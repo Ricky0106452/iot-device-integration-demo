@@ -16,6 +16,32 @@
 
 ## 快速開始
 
+需要 Docker Engine 與 Docker Compose，使用 Linux containers。在專案根目錄執行：
+
+```powershell
+docker compose up -d --build --wait
+```
+
+會建立共用 Python 映像，啟動 Simulator、Gateway、Receiver、FastAPI、Mosquitto 與 PostgreSQL；另依序執行一次性的 migration 與設備／點位初始化，成功後才啟動依賴它們的服務。Gateway 等 Simulator 與 Receiver 訂閱就緒後開始採集。
+
+開啟 [Swagger UI](http://127.0.0.1:8000/docs) 或 [全部量測](http://127.0.0.1:8000/telemetry)。首次採集完成前，歷史清單可能為空。`migrate`、`device-setup` 顯示 `Exited (0)` 是正常完成，其他六個服務持續執行。
+
+若原本已手動啟動 Simulator、Gateway、Receiver 或 API，請先停止，避免占用相同 port 或讓兩個 Receiver 共用 Client ID。既有 Compose 的 Broker／PostgreSQL 不必先刪除資料。
+
+```powershell
+docker compose ps -a
+docker compose logs -f gateway receiver
+docker compose down
+```
+
+按 Ctrl+C 結束 logs 追蹤，服務仍繼續運行；`down` 才停止服務並移除容器，保留 DB、Broker 與 Gateway 待送資料的三個 volumes。不要加 `-v`，除非確定要刪除這些資料。
+
+Docker Gateway 使用 `gateway-data` volume，與主機上的 `data/` 是不同儲存；切換模式不會自動搬移既有待送資料。連接埠調整、migration 操作及部署驗證見 [Compose 部署](docs/verification/compose-deployment.md)。
+
+## 本機 Python 開發
+
+保留以下分程序啟動方式，適合除錯及逐步觀察資料流。不需要與 Docker 的四個應用服務同時啟動。
+
 前置條件：Python 3.12、Docker Engine 與 Docker Compose（使用 Linux containers）。以下以 Windows／PowerShell 為例，所有終端都從專案根目錄執行。本機驗證版本為 Python 3.12.14，Python 套件版本見 [requirements.txt](requirements.txt)。
 
 ### 1. 安裝 Python 套件
@@ -110,7 +136,7 @@ API 讀取已保存的資料；只查歷史時不需要模擬器或 receiver 持
 docker compose down
 ```
 
-`down` 會停止 Broker 與 PostgreSQL，保留資料庫與 Broker volume；不要加 `-v`，除非確定要刪除資料。
+`down` 會停止 Broker 與 PostgreSQL，保留資料庫、Broker 與 Gateway volume；不要加 `-v`，除非確定要刪除資料。
 
 ## API
 
@@ -145,7 +171,7 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-最近一次完整本機驗證為 **136 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收及 Topic／raw 換算矛盾拒收後持續入庫驗證；本次使用新建臨時資料庫與 Broker，未使用展示資料。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
+最近一次完整本機驗證為 **139 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收及 Topic／raw 換算矛盾拒收後持續入庫驗證；本次使用新建臨時資料庫與 Broker，未使用展示資料。Linux 映像內另驗證 134 項通過、5 項恢復測試因未配置本機 Broker 而跳過，詳見 [Compose 部署驗證](docs/verification/compose-deployment.md)。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
 
 另外 7 個 migration／ORM 測試會執行升降版，必須使用新建的獨立測試庫。完整執行方式與既有套件提醒見 [migration 測試說明](docs/verification/multi-sensor-migration.md#重現完整測試)；不應在展示 DB 執行這組測試。持續模式驗證見 [Gateway 輪詢紀錄](docs/verification/gateway-polling.md)，既有完整資料流見 [切換與驗證紀錄](docs/verification/measurement-point-cutover.md)。
 
@@ -160,6 +186,7 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 
 ## 相關文件
 
+- [Compose 啟動與部署驗證](docs/verification/compose-deployment.md)
 - [Gateway 離線保存與補送](docs/verification/gateway-offline-buffer.md)
 - [設備規格與單次讀值除錯](docs/DEVICE_SPEC.md)
 - [MQTT 契約與通訊檢查](docs/mqtt/CONTRACT.md)

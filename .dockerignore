@@ -1,0 +1,23 @@
+# 僅傳入建置所需原始碼、測試與公開範例；不包含個人筆記、Git 或本地資料。
+*
+!requirements.txt
+!alembic.ini
+!migrations/
+!migrations/**
+!api/
+!api/**
+!gateway/
+!gateway/**
+!receiver/
+!receiver/**
+!simulator/
+!simulator/**
+!storage/
+!storage/**
+!tests/
+!tests/**
+!docs/
+!docs/mqtt/
+!docs/mqtt/telemetry.example.json
+**/__pycache__/
+**/*.pyc

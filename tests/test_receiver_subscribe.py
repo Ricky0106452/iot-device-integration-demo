@@ -310,5 +310,59 @@ class ReceiverAckTests(unittest.TestCase):
         engine.return_value.dispose.assert_called_once()
 
 
+class ReceiverReadinessTests(unittest.TestCase):
+    setUp = ReceiverSubscribeTests.setUp
+
+    def test_ready_marker_follows_suback_and_is_removed_on_exit(self):
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'receiver.ready'
+            observed = []
+            class Output(io.StringIO):
+                def write(stream, value):
+                    if 'receiver_ready' in value:
+                        observed.append(path.read_text(encoding='utf-8'))
+                    return super().write(value)
+            def subscribe(*args, **kwargs):
+                self.assertFalse(path.exists())
+                self.client.on_subscribe(self.client, None, 1, [SimpleNamespace(value=1)], None)
+                self.client.on_disconnect(self.client, None, None, SimpleNamespace(), None)
+                return mqtt.MQTT_ERR_SUCCESS, 1
+            self.client.subscribe.side_effect = subscribe
+            with redirect_stdout(Output()), redirect_stderr(io.StringIO()):
+                run_receiver(self.client, store=self.store, ready_file=path, timeout=.01)
+            self.assertEqual(observed, ['subscribed'])
+            self.assertFalse(path.exists())
+            self.client.disconnect.assert_called_once()
+            self.client.loop_stop.assert_called_once()
+
+    def test_stale_marker_is_removed_before_failed_connect(self):
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'receiver.ready'
+            path.write_text('stale', encoding='utf-8')
+            def fail(*args, **kwargs):
+                self.assertFalse(path.exists())
+                raise ConnectionRefusedError('offline')
+            self.client.connect.side_effect = fail
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(run_receiver(self.client, store=self.store,
+                    ready_file=path, timeout=.01), 1)
+            self.assertFalse(path.exists())
+
+    def test_marker_write_failure_still_closes_mqtt(self):
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'missing-parent' / 'receiver.ready'
+            def subscribe(*args, **kwargs):
+                self.client.on_subscribe(self.client, None, 1, [SimpleNamespace(value=1)], None)
+                return mqtt.MQTT_ERR_SUCCESS, 1
+            self.client.subscribe.side_effect = subscribe
+            with self.assertRaises(FileNotFoundError):
+                run_receiver(self.client, store=self.store, ready_file=path, timeout=.01)
+            self.client.disconnect.assert_called_once()
+            self.client.loop_stop.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
