@@ -194,3 +194,19 @@ class ReceiverRecoveryTests(unittest.TestCase):
         self.wait_event(receiver, 'telemetry_stored')
         self.assertIsNone(receiver.poll())
         self.assert_rows(1, 4)
+
+    def test_inconsistent_measurements_do_not_store_or_block_valid_message(self):
+        receiver = self.start()
+        self.wait_event(receiver, 'receiver_ready')
+        for field, value in [('voltage_v', 231.0), ('current_a', 10.01),
+                             ('power_w', 2301), ('energy_wh', 70001)]:
+            payload = {**self.payload, 'measurement': {**self.payload['measurement'], field: value}}
+            publish_telemetry(payload, port=self.port)
+            rejected = self.wait_event(receiver, 'telemetry_rejected')
+            self.assertEqual(rejected['code'], 'invalid_payload')
+            self.assertIn(field, rejected['reason'])
+            self.assert_rows(0, 0)
+        self.publish()
+        self.wait_event(receiver, 'telemetry_stored')
+        self.assertIsNone(receiver.poll())
+        self.assert_rows(1, 4)

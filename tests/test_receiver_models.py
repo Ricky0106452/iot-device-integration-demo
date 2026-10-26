@@ -1,5 +1,6 @@
 """S2-03A：接收模型必須執行 v1 訊息規則。"""
 from copy import deepcopy
+from decimal import Decimal
 import json
 from pathlib import Path
 import unittest
@@ -48,6 +49,7 @@ class TelemetryModelTests(unittest.TestCase):
                                  (6553.5, 655.35), (0, 0)]:
             message = deepcopy(self.example)
             message["measurement"].update(voltage_v=voltage, current_a=current)
+            message["raw_registers"][:2] = [int(Decimal(str(voltage)) * 10), int(Decimal(str(current)) * 100)]
             with self.subTest(voltage=voltage, current=current):
                 model = self.parse(message)
                 self.assertEqual(model.measurement.voltage_v, voltage)
@@ -55,6 +57,37 @@ class TelemetryModelTests(unittest.TestCase):
         # JSON 的小數尾零只改變表示，不改變數值。
         raw = json.dumps(self.example).replace('"voltage_v": 230.0', '"voltage_v": 230.00')
         self.assertEqual(Telemetry.model_validate_json(raw).measurement.voltage_v, 230)
+
+    def test_rejects_each_inconsistent_measurement_without_correcting(self):
+        changes = [('voltage_v', 230.1), ('current_a', 10.01),
+                   ('power_w', 2301), ('energy_wh', 70001)]
+        for field, value in changes:
+            message = deepcopy(self.example)
+            message['measurement'][field] = value
+            original = deepcopy(message)
+            with self.subTest(field=field):
+                with self.assertRaises(ValidationError) as caught:
+                    self.parse(message)
+                self.assertIn(field, str(caught.exception))
+                self.assertEqual(message, original)
+
+    def test_rejects_each_raw_word_changed_without_measurement(self):
+        for index in range(5):
+            message = deepcopy(self.example)
+            message['raw_registers'][index] += 1
+            with self.subTest(index=index), self.assertRaises(ValidationError):
+                self.parse(message)
+
+    def test_energy_high_word_first_boundaries_and_swapped_words(self):
+        for high, low, energy in [(0, 65535, 65535), (1, 0, 65536), (1, 4464, 70000)]:
+            message = deepcopy(self.example)
+            message['raw_registers'][3:] = [high, low]
+            message['measurement']['energy_wh'] = energy
+            with self.subTest(energy=energy):
+                self.assertEqual(self.parse(message).measurement.energy_wh, energy)
+        message['raw_registers'][3:] = [4464, 1]
+        with self.assertRaises(ValidationError):
+            self.parse(message)
 
     def test_every_contract_field_is_required(self):
         for field in self.example:

@@ -4,7 +4,7 @@ from decimal import Decimal
 import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
@@ -37,7 +37,7 @@ class Measurement(BaseModel):
 
 
 class Telemetry(BaseModel):
-    """一筆 v1 量測；驗證欄位，不代表已核對 Topic 或完成持久儲存。"""
+    """一筆電表 v1 量測；驗證欄位與 raw 換算，Topic 另由接收流程核對。"""
     model_config = ConfigDict(strict=True, extra="forbid")
 
     schema_version: Literal[1]
@@ -67,3 +67,20 @@ class Telemetry(BaseModel):
         if info.field_name == "acquired_at":
             datetime.fromisoformat(value.replace("Z", "+00:00"))
         return value
+
+
+    @model_validator(mode="after")
+    def require_raw_measurement_consistency(self):
+        # 僅依 SIM-POWER-01 契約核對編碼；不檢查正常工作範圍或 W=V×A。
+        raw = self.raw_registers
+        value = self.measurement
+        comparisons = (
+            ("voltage_v", Decimal(str(value.voltage_v)), Decimal(raw[0]) / 10),
+            ("current_a", Decimal(str(value.current_a)), Decimal(raw[1]) / 100),
+            ("power_w", value.power_w, raw[2]),
+            ("energy_wh", value.energy_wh, raw[3] * 65536 + raw[4]),
+        )
+        for field, actual, expected in comparisons:
+            if actual != expected:
+                raise ValueError(f"measurement.{field} 與 raw_registers 不一致，預期 {expected}")
+        return self

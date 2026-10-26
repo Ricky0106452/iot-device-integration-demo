@@ -106,15 +106,18 @@ class StoreTelemetryTests(unittest.TestCase):
 
     def test_changed_source_fields_are_conflicts_and_original_is_preserved(self):
         self.store()
-        changes = {
-            "gateway_id": "gateway-002",
-            "acquired_at": "2026-10-22T01:00:01Z",
-            "raw_registers": [2301, 1000, 2300, 1, 4464],
-            "measurement": {**self.payload["measurement"], "voltage_v": 230.1, "current_a": 10.01},
-        }
-        for field, value in changes.items():
-            with self.subTest(field=field):
-                altered = {**self.payload, field: value}
+        changes = [
+            {"gateway_id": "gateway-002"},
+            {"acquired_at": "2026-10-22T01:00:01Z"},
+            {"raw_registers": [2301, 1000, 2300, 1, 4464],
+             "measurement": {**self.payload["measurement"], "voltage_v": 230.1}},
+            {"raw_registers": [2301, 1001, 2300, 1, 4464],
+             "measurement": {**self.payload["measurement"], "voltage_v": 230.1, "current_a": 10.01}},
+        ]
+        for change in changes:
+            # 矛盾 raw／measurement 已在接收模型拒收；此處驗證合法但不同內容的衝突。
+            with self.subTest(change=change):
+                altered = {**self.payload, **change}
                 self.assertEqual(self.store(altered), "conflict")
         row = self.read()
         self.assertEqual(row.gateway_id, "gateway-001")

@@ -2,9 +2,9 @@
 
 日期：2026-10-22。本文件定義電表 v1 契約，同時保留當時的分階段實作紀錄。
 
-目前 Gateway 單次／持續採集與發布、Pydantic 驗證、Topic／payload 設備身分一致性、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
+目前 Gateway 單次／持續採集與發布、Pydantic 驗證、Topic／payload 設備身分與 raw 換算一致性、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。
 
-本文的大小上限、重複 JSON key、Gateway 對應、raw 換算一致性與 retained 回放拒收等仍是目標規則，尚未全部實作；不能把文件中的「應／須」當成現有接收端已完成檢查。
+本文的大小上限、重複 JSON key、Gateway 對應與 retained 回放拒收等仍是目標規則，尚未全部實作；不能把文件中的「應／須」當成現有接收端已完成檢查。
 
 ## 1. 標準與專案約定的邊界
 
@@ -67,7 +67,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 - 依 [ADR-0003](../decisions/0003-preserve-measurement-values.md)，偏高但可解析的量測仍保留，例如 430 V、40 A、6000 W；不以正常模擬工作範圍拒收、不截斷。
 - schema 的量測上下限來自固定 UInt16／UInt32 編碼及倍率，不是告警門檻。
 - 電壓須為 0.1 V 的整數倍，電流須為 0.01 A 的整數倍，依本設備倍率限制解析度；例如 230.04 V、10.001 A 拒收，不交給 DB 四捨五入。接收模型以 Decimal(str(value)) 檢查刻度，對外 schema 使用 multipleOf；230、230.0、230.00 視為同一數值。
-- 平台需核對 raw 與換算值一致：V=word0/10，A=word1/100，W=word2，Wh=word3×65536+word4。電壓與電流用十進位語意比較，避免二進位浮點直接比較導致誤判；不允許自行修正矛盾資料。
+- 接收模型已核對 raw 與換算值一致：V=word0/10，A=word1/100，W=word2，Wh=word3×65536+word4。電壓與電流用十進位語意比較，避免二進位浮點直接比較導致誤判；不允許自行修正矛盾資料。任一欄不一致拒收整筆，以 invalid_payload 記錄不一致欄位與預期值；沿用永久拒收 ACK，不呼叫儲存。此為 Pydantic 跨欄位驗證，JSON Schema 文件不自動執行算術比對。
 - 不驗證 W 必須等於 V×A，也不因此丟棄量測；此公式只是模擬運轉模型，不是通用電力設備資料約束。
 - 累積電量下降不拒收；不連續標記與差值處理依設備規格於後續階段完成。
 - 設備讀取失敗、設備例外或無法解析時，不生成 telemetry、message_id 或假的零值快照；Gateway 另記嘗試時間與失敗類別。
@@ -86,7 +86,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 發布端等待 CONNACK 成功後才送；`publish()` 回傳成功只表示 client 接受操作，收到 QoS 1 PUBACK 才記 `publish_acknowledged`。PUBACK 不代表平台收到、驗證、寫入資料庫或已持久保存。
 
-接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息、Topic 不一致或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。Receiver 使用手動 ACK：有效訊息在交易提交／確認相同重送後才確認；已記錄的格式、Topic 不一致、設備設定拒收與內容衝突也確認，避免無限重送。DB／非預期例外不確認並結束程序，重啟後由持久工作階段重新投遞。MQTT ACK 不是對發布者的業務成功回應；目前沒有業務回執 Topic。
+接收端驗證與儲存後記錄最後結果：新資料 commit 成功才記 `telemetry_stored`，正常重送記 `telemetry_duplicate`，同 ID 不同內容記 `telemetry_conflict`。log 保留 message_id、device_id、gateway_id、acquired_at、received_at，新資料另有提交後記錄的 stored_at。非法訊息、Topic／raw 換算不一致或設備／點位設定錯誤記 `telemetry_rejected`，跳過該筆並繼續接收。Receiver 使用手動 ACK：有效訊息在交易提交／確認相同重送後才確認；已記錄的格式、Topic／raw 換算不一致、設備設定拒收與內容衝突也確認，避免無限重送。DB／非預期例外不確認並結束程序，重啟後由持久工作階段重新投遞。MQTT ACK 不是對發布者的業務成功回應；目前沒有業務回執 Topic。
 
 接收端遇到 `message.retain=True` 的 retained 回放視為契約違反，記錄並忽略。MQTT 3.1.1 對既有訂閱轉送的 live 訊息可能清除 RETAIN flag，因此此檢查不能證明發布端從未使用 retain；仍須由發布端設定及測試保證。
 
@@ -118,7 +118,8 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 - [ ] 基準與偏高值可發布，接收端驗證通過；log 可用同一 message_id 追查讀取、發布確認及接收。
 - [ ] UUID、時間、資料型別、缺欄位、未知版本、非法 JSON／重複 key、過大 payload 均按契約處理。
-- [ ] Topic／payload ID 不符、未知設備、Gateway 不符、raw 換算矛盾可拒收；下一筆合法資料仍可接收。
+- [x] Topic／payload ID 不符、未知設備、raw 換算矛盾可拒收；下一筆合法資料仍可接收。
+- [ ] Gateway／設備授權對應不符可拒收。
 - [ ] 設備失聯或例外不發布偽造量測；Broker 失聯或確認逾時不記假成功。
 - [ ] 重送同一讀值保留 ID／取得時間；新讀值即使值相同仍使用新 ID。
 - [ ] 證明 retain=False；接收端沒有既有訂閱且已離線時，不把 QoS 1 說成資料不會遺失。

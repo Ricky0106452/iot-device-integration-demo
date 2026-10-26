@@ -27,7 +27,7 @@ flowchart LR
         PG -->|資料儲存| PSTORE
     end
 
-    RX["Receiver · Python 程序<br/>Pydantic 驗證、SQLModel 入庫<br/>入庫完成後手動 ACK"]
+    RX["Receiver · Python 程序<br/>Pydantic 與 raw 換算驗證、SQLModel 入庫<br/>入庫完成後手動 ACK"]
     API["FastAPI · Python 程序<br/>設備、點位、最新與歷史查詢"]
     USER["使用者<br/>Swagger UI／HTTP client"]
 
@@ -77,8 +77,8 @@ sequenceDiagram
 
     opt Broker 已收到且投遞訊息
         B->>R: PUBLISH（QoS 1）
-        R->>R: Pydantic 欄位與 Topic 身分一致性驗證
-        alt 格式錯誤或 Topic 不一致
+        R->>R: 欄位、raw 換算與 Topic 身分驗證
+        alt 格式錯誤、raw 矛盾或 Topic 不一致
             R->>R: 記錄拒收
             R-->>B: PUBACK，避免無限重送
         else 欄位合法

@@ -64,6 +64,7 @@ class PointApiTests(unittest.TestCase):
         payload.update(device_id=self.device_id, message_id=message_id or str(uuid4()),
             acquired_at=(datetime(2026, 10, 23, tzinfo=timezone.utc) + timedelta(seconds=offset)).isoformat())
         payload["measurement"]["voltage_v"] = voltage
+        payload["raw_registers"][0] = int(Decimal(str(voltage)) * 10)
         store_telemetry(self.engine, Telemetry.model_validate(payload),
             received_at=datetime(2026, 10, 23, 1, tzinfo=timezone.utc))
         return payload["message_id"]

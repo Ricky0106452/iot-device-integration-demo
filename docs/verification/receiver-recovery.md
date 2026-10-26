@@ -34,7 +34,7 @@ $env:IOT_RECOVERY_BROKER_PORT = '11883'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_receiver_recovery.py -v
 ```
 
-目前此檔包含三項原有恢復驗證與一項 Topic 一致性驗證，應為四項通過。測試自行使用隨機 Client ID 與設備 ID，清除自己的工作階段與資料；拒絕使用展示 Broker 的 1883。臨時 DB 仍必須另外清理。若要重現完整 109 項，再將 IOT_MIGRATION_TEST_DATABASE_URL 設為同一個新建臨時 DB，執行 unittest discover -s tests -v；不得改成展示 DB。
+目前此檔包含三項原有恢復驗證、Topic 一致性及 raw 換算一致性驗證，應為五項通過。測試自行使用隨機 Client ID 與設備 ID，清除自己的工作階段與資料；拒絕使用展示 Broker 的 1883。臨時 DB 仍必須另外清理。若要重現完整 109 項，再將 IOT_MIGRATION_TEST_DATABASE_URL 設為同一個新建臨時 DB，執行 unittest discover -s tests -v；不得改成展示 DB。
 
 測試結束後，在建立上述資源的同一個終端清理：
 
@@ -85,3 +85,16 @@ Receiver 在入庫前精確核對完整 Topic 與 payload.device_id；路徑或�
 - 完整回歸為 131 個測試通過、無跳過；未設定外部環境時為 94 個通過、37 個跳過。新增案例沿用前述獨立 Broker／DB 的執行方式。
 - 臨時 Broker、volume、DB 與 Receiver 子程序均已清理，未寫入展示 DB 或停止展示 Broker。
 - 本次未加入 raw／measurement 一致性、認證授權或 CI；不把設備 ID 一致性當成發布者身分可信的證明。
+
+
+## raw／measurement 一致性（2026-10-25）
+
+Telemetry 使用 Pydantic after model validator，在各欄位合法後依固定 SIM-POWER-01 v1 契約核對：V=word0/10、A=word1/100、W=word2、Wh=word3*65536+word4。V／A 以 Decimal(str(value)) 與從整數 word 算出的 Decimal 精確比較，其餘用整數；不設浮點誤差容忍、不修正來源、不驗證 W=V×A。
+
+- 四個 measurement 欄位各自不一致，以及五個 raw word 各自被改動都拒收；跨 word 電量 65535、65536、70000 與高低字交換有覆蓋。
+- 一致的零值、偏高值、編碼最大值、小數刻度與尾零表示仍接受；既有合法測試資料同步提供一致 raw，不放寬驗證。
+- 失敗沿既有 invalid_payload 路徑記錄，reason 指出欄位及預期值；跨欄位驗證的 field 為根層空陣列，不輸出完整 payload。記錄後 ACK，不進儲存。
+- 真實獨立 Broker／臨時 DB：四種矛盾逐筆拒收，DB 持續為零份快照、零筆點位值；同一 Receiver 接著處理合法訊息，保存一份快照、四筆點位值。
+- 完整回歸為 136 個測試通過、無跳過；未設定外部環境時為 98 個通過、38 個跳過。測試資源已清理，未寫入展示 DB 或中斷展示 Broker。
+- 本項只驗證既定契約內部一致，不證明設備映射、硬體採樣或倍率設定本身正確。未加入通用設備框架、套件、資料表或 CI。
+- 另重跑實際動態 Simulator → Gateway → Broker → Receiver → DB → 五支資料 API，正常採集、Receiver 補收、Gateway 保存六筆後強制終止重啟補送、確認不確定時去重均通過，最終十四份快照／五十六筆點位值；此流程不計入 136 項 unittest。隔離資源已清理。

@@ -258,6 +258,18 @@ class ReceiverAckTests(unittest.TestCase):
         self.store.assert_not_called()
         self.client.ack.assert_called_once_with(9, 1)
 
+    def test_inconsistent_measurement_is_rejected_and_acknowledged(self):
+        self.message['measurement']['voltage_v'] = 231.0
+        self.deliver()
+        code, output, errors = self.capture_run()
+        self.assertEqual(code, 1)  # 測試替身最後主動斷線。
+        self.store.assert_not_called()
+        self.assertNotIn('telemetry_stored', output)
+        rejection = json.loads(errors.splitlines()[0])
+        self.assertEqual(rejection['code'], 'invalid_payload')
+        self.assertIn('voltage_v', rejection['reason'])
+        self.client.ack.assert_called_once_with(9, 1)
+
     def test_invalid_message_is_acknowledged_after_rejection(self):
         order = self.deliver(payload=b'{}')
         _, _, errors = self.capture_run()
