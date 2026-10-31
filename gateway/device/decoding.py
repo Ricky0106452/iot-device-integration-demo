@@ -1,7 +1,7 @@
 """Decode the fixed SIM-POWER-01 layout from docs/DEVICE_SPEC.md."""
 from dataclasses import dataclass
 
-from gateway.device_spec import MEASUREMENT_REGISTER_COUNT
+from gateway.device.spec import MEASUREMENT_REGISTER_COUNT
 
 
 @dataclass(frozen=True)

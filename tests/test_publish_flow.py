@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 from pymodbus.client import ModbusTcpClient
 
-from gateway.publish_flow import acquire_and_publish
+from gateway.device.reader import acquire_and_handle
 
 
 class PublishFlowTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class PublishFlowTests(unittest.TestCase):
         publish = Mock()
         stdout, stderr = io.StringIO(), io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            exit_code = acquire_and_publish(client, publish, device_id=1)
+            exit_code = acquire_and_handle(client, publish, device_id=1)
         self.assertNotEqual(exit_code, 0)
         publish.assert_not_called()
         self.assertEqual(stdout.getvalue(), "")
@@ -42,7 +42,7 @@ class PublishFlowTests(unittest.TestCase):
         response.registers = [2300, 1000, 2300, 1, 4464]
         publish = Mock()
 
-        self.assertEqual(acquire_and_publish(client, publish, device_id=1), 0)
+        self.assertEqual(acquire_and_handle(client, publish, device_id=1), 0)
         publish.assert_called_once()
         snapshot = publish.call_args.args[0]
         self.assertEqual(snapshot["raw_registers"], response.registers)

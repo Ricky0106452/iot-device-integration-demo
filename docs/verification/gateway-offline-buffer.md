@@ -20,7 +20,7 @@
 先依 [README](../../README.md#快速開始) 完成 migration、設備初始化、持久 Broker、Simulator 及 Receiver，再執行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m gateway.poll --interval 5
+.\.venv\Scripts\python.exe -m gateway.main --interval 5
 ```
 
 | 參數 | 預設 | 意義 |
@@ -35,7 +35,7 @@
 
 每個檔案只供一個 Gateway 程序使用；不同並行實例需指定不同 --outbox。同一 Gateway 的替代程序必須接回原檔案，且不要任意切換其目標環境。執行中不要刪除 SQLite；使用自訂路徑時，避免將量測資料加入 Git。
 
-單次 gateway.publish_once 不使用 SQLite，仍是直接發布的診斷工具。
+目前僅保留 gateway.main 持續採集入口，所有採集訊息先保存至 SQLite 再補送。
 
 ## 故障操作驗收
 
@@ -43,7 +43,7 @@
 
 1. 正常採集時觀察 telemetry_buffered、publish_acknowledged，以及 Receiver 的 telemetry_stored。
 2. 停止 Broker：docker compose stop mosquitto。Receiver 可能因失聯退出，屬既有行為。Gateway 應持續出現新的 telemetry_buffered 與發布錯誤。
-3. 保留 SQLite，停止並重新執行同一條 gateway.poll 指令；Broker 尚未恢復時仍保留待送資料。
+3. 保留 SQLite，停止並重新執行同一條 gateway.main 指令；Broker 尚未恢復時仍保留待送資料。
 4. 執行 docker compose up -d mosquitto，重新啟動相同 Client ID 的 Receiver。觀察舊 message_id 被發布並入庫，API 可查到原取得時間與數值。
 5. 在測試檔案上使用 --max-pending 3，可觀察 Broker 離線時 outbox_discarded：reason=capacity_limit、dropped_count 為本次實際淘汰筆數。被淘汰資料不再保證補回。
 

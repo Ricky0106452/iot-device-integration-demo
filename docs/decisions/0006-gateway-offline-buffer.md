@@ -1,5 +1,7 @@
 # ADR-0006：Broker 離線時由 Gateway 保存量測並補送
 
+> 歷史紀錄：以下保留當時檔名與驗證結果。目前 Gateway 統一使用 `python -m gateway.main`，單次診斷入口已移除；現行分工見 [README](../../README.md#gateway-程式分工)。
+
 日期：2026-10-24。狀態：Gateway 持續模式已實作，完成本地交易與獨立環境的故障補送驗證。
 
 ## 情境與目標

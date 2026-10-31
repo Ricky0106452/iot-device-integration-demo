@@ -1,5 +1,7 @@
 # 感測點改版第 4 步：本機主庫切換
 
+> 歷史紀錄：以下保留當時檔名與驗證結果。目前 Gateway 統一使用 `python -m gateway.main`，單次診斷入口已移除；現行分工見 [README](../../README.md#gateway-程式分工)。
+
 日期：2026-10-23。狀態：已完成，主 iot_demo 為 0002 (head)，alembic check 無差異。
 
 ## 升版前

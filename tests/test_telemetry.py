@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from uuid import UUID
 
-from gateway.telemetry import build_telemetry
+from gateway.messaging.telemetry import build_telemetry
 
 ROOT = Path(__file__).resolve().parents[1]
 

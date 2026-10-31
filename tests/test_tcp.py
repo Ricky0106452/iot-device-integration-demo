@@ -9,6 +9,8 @@ import unittest
 
 from pymodbus.client import ModbusTcpClient
 
+from gateway.device.reader import AcquisitionError, read_snapshot
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -52,9 +54,13 @@ class TcpReadTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.stop_server()
 
-    def test_read_once_from_separate_process(self):
+    def test_read_snapshot_from_separate_process(self):
         result = subprocess.run(
-            [sys.executable, "-m", "gateway.read_once", "--port", str(self.port)],
+            [sys.executable, "-c",
+             "import json, sys; from pymodbus.client import ModbusTcpClient; "
+             "from gateway.device.reader import read_snapshot; "
+             "print(json.dumps(read_snapshot(ModbusTcpClient('127.0.0.1', "
+             "port=int(sys.argv[1]), timeout=1, retries=0), device_id=1)))", str(self.port)],
             cwd=ROOT, capture_output=True, text=True, timeout=5,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -81,13 +87,7 @@ class TcpReadTests(unittest.TestCase):
         with socket.socket() as endpoint:
             endpoint.bind(("127.0.0.1", 0))
             port = endpoint.getsockname()[1]
-            result = subprocess.run(
-                [sys.executable, "-m", "gateway.read_once", "--port", str(port),
-                 "--timeout", "0.2"],
-                cwd=ROOT, capture_output=True, text=True, timeout=5,
-            )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "")
-        payload = json.loads(result.stderr.strip().splitlines()[-1])
-        self.assertEqual(payload["code"], "connection_failed")
-        self.assertNotIn("measurement", payload)
+            client = ModbusTcpClient("127.0.0.1", port=port, timeout=0.2, retries=0)
+            with self.assertRaises(AcquisitionError) as raised:
+                read_snapshot(client, device_id=1)
+        self.assertEqual(raised.exception.code, "connection_failed")

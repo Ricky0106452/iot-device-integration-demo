@@ -103,7 +103,7 @@ Receiver 預設以固定身分 `rx-demo-001` 建立持久訂閱；停止後重�
 ### 5. 持續採集並發布（終端 C）
 
 ```powershell
-.\.venv\Scripts\python.exe -m gateway.poll --interval 5
+.\.venv\Scripts\python.exe -m gateway.main --interval 5
 ```
 
 Gateway 立即採集一輪，每輪讀取並保存後等 5 秒再繼續，採集不重疊。量測先寫入本地 SQLite，再由獨立執行緒發布；Broker 離線時持續保存，恢復後補送。保持終端執行，按 `Ctrl+C` 停止，剩餘待送資料留到下次啟動。
@@ -112,11 +112,20 @@ Gateway 立即採集一輪，每輪讀取並保存後等 5 秒再繼續，採集
 
 預設待送檔案為 `data/gateway-001-outbox.sqlite3`，最多 10,000 筆，滿時淘汰最舊資料並記錄筆數。重啟沿用同一檔案，不要讓兩個 Gateway 同時使用；此路徑不納入 Git。可用 `--outbox`、`--max-pending`、`--retry-interval` 調整，見 [離線補送](docs/verification/gateway-offline-buffer.md)。
 
-若只想採集一次，以下是直接發布的診斷模式，**不提供本地保存與補送**，不必與持續模式同時啟動：
+### Gateway 程式分工
 
-```powershell
-.\.venv\Scripts\python.exe -m gateway.publish_once
+Gateway 只保留 `python -m gateway.main` 持續採集入口；單次讀取／發布 CLI 已移除。
+
+```text
+gateway/
+├── main.py          # 啟動入口、命令列設定、資源生命週期
+├── polling.py       # 持續採集、快照入列、喚醒補送
+├── device/          # reader.py 讀取設備；decoding.py 解碼；spec.py 暫存器規格
+├── messaging/       # telemetry.py 組裝訊息；publisher.py 發布並等待 MQTT 確認
+└── buffering/       # outbox.py 本地保存；sender.py 背景補送
 ```
+
+閱讀順序：`main.py` → `polling.py` → `device/reader.py`；訊息經 `messaging/telemetry.py` 組裝後寫入 Outbox，再由背景 Sender 呼叫 Publisher 補送。單輪讀取仍是內部函式，不再提供獨立診斷入口。
 
 ### 6. 啟動 API 並查詢（終端 D）
 
@@ -188,7 +197,7 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 
 - [Compose 啟動與部署驗證](docs/verification/compose-deployment.md)
 - [Gateway 離線保存與補送](docs/verification/gateway-offline-buffer.md)
-- [設備規格與單次讀值除錯](docs/DEVICE_SPEC.md)
+- [設備規格與採集說明](docs/DEVICE_SPEC.md)
 - [MQTT 契約與通訊檢查](docs/mqtt/CONTRACT.md)
 - [資料結構與 migration 操作](docs/storage/SCHEMA.md)
 - [感測點映射與儲存設計](docs/storage/SNAPSHOT_POINT_MAPPING.md)

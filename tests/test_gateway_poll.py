@@ -8,8 +8,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from gateway.poll import main, run_polling, acquire_to_outbox
-from gateway.outbox import Outbox
+from gateway.main import main
+from gateway.polling import run_polling, acquire_to_outbox
+from gateway.buffering.outbox import Outbox
 
 
 class GatewayPollingTests(unittest.TestCase):
@@ -46,9 +47,9 @@ class GatewayPollingTests(unittest.TestCase):
                 run_polling(Mock(), interval=interval)
 
     def test_cli_reuses_device_options_and_default_interval(self):
-        with patch('gateway.poll.Outbox') as box, patch('gateway.poll.OutboxSender'), \
-             patch('gateway.poll.acquire_to_outbox', return_value=0) as acquire, \
-             patch('gateway.poll.run_polling') as poll:
+        with patch('gateway.main.Outbox') as box, patch('gateway.main.OutboxSender'), \
+             patch('gateway.main.acquire_to_outbox', return_value=0) as acquire, \
+             patch('gateway.main.run_polling') as poll:
             poll.side_effect = lambda acquire, **kw: acquire()
             self.assertEqual(main(['--device-port', '1503', '--device-id', 'meter-002']), 0)
             args = acquire.call_args.args[0]
@@ -75,7 +76,7 @@ class GatewayPollingTests(unittest.TestCase):
         sender = Mock()
         output = io.StringIO()
         with TemporaryDirectory() as directory, Outbox(Path(directory) / 'box.db', max_pending=1) as box, \
-             patch('gateway.poll.ModbusTcpClient', side_effect=clients), \
+             patch('gateway.polling.ModbusTcpClient', side_effect=clients), \
              redirect_stdout(output), redirect_stderr(io.StringIO()) as errors:
             acquire_to_outbox(self.args(), box, sender)
             first = box.oldest().message
@@ -96,13 +97,13 @@ class GatewayPollingTests(unittest.TestCase):
     def test_failed_device_acquisition_never_enqueues(self):
         client = self.device(False)
         box = Mock()
-        with patch('gateway.poll.ModbusTcpClient', return_value=client), redirect_stderr(io.StringIO()):
+        with patch('gateway.polling.ModbusTcpClient', return_value=client), redirect_stderr(io.StringIO()):
             self.assertEqual(acquire_to_outbox(self.args(), box, Mock()), 1)
         box.enqueue.assert_not_called()
         client.close.assert_called_once()
 
     def test_storage_failure_is_nonzero_and_not_reported_as_buffered(self):
-        with TemporaryDirectory() as directory, patch('gateway.poll.Outbox', side_effect=sqlite3.OperationalError('disk full')), \
+        with TemporaryDirectory() as directory, patch('gateway.main.Outbox', side_effect=sqlite3.OperationalError('disk full')), \
              redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
             self.assertEqual(main(['--outbox', str(Path(directory) / 'box.db')]), 1)
         self.assertEqual(output.getvalue(), '')
@@ -110,9 +111,10 @@ class GatewayPollingTests(unittest.TestCase):
 
     def test_cli_invalid_options_do_not_start_polling(self):
         for options in [['--interval', '0'], ['--interval', 'nan'], ['--device-port', '0'],
-                        ['--mqtt-timeout', '6'], ['--max-pending', '0'],
+                        ['--mqtt-timeout', '6'], ['--device-id', 'INVALID'], ['--unit-id', '0'],
+                        ['--read-timeout', 'nan'], ['--broker-port', '0'], ['--max-pending', '0'],
                         ['--retry-interval', 'nan'], ['--retry-interval', '-1'], ['--outbox', ':memory:']]:
-            with self.subTest(options=options), patch('gateway.poll.run_polling') as poll:
+            with self.subTest(options=options), patch('gateway.main.run_polling') as poll:
                 with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                     main(options)
                 poll.assert_not_called()

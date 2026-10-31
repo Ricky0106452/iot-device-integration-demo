@@ -113,36 +113,21 @@ Host、Port、Device／Unit ID、輪詢間隔與逾時由設定提供，不寫�
 對應 [實作階段](../ROADMAP.md)。設備與讀取解析先於階段 1 完成；控制在階段 5、故障恢復在階段 6 驗證，不因規格定案提前實作整套系統。
 
 
-## 7. 單次讀值除錯
+## 7. 設備讀取與解析
 
-只檢查 Modbus 與解析時，不需要 MQTT 或 PostgreSQL。在專案根目錄開兩個終端：
+設備讀取邏輯位於 `gateway/device/reader.py`，暫存器規格與解碼分別位於同資料夾的 `spec.py`、`decoding.py`。讀取成功才產生快照，失敗會關閉設備連線且不產生假量測。
 
-```powershell
-# 終端 A：啟動模擬電表，保持執行
-.\.venv\Scripts\python.exe -m simulator.server --fixed
-```
-
-```powershell
-# 終端 B：讀取一次
-.\.venv\Scripts\python.exe -m gateway.read_once
-```
-
-正常結果包含 raw_registers=[2300, 1000, 2300, 1, 4464]，以及 230.0 V、10.0 A、2300 W、70000 Wh。此診斷輸出另有 status、數值型 Modbus device_id 與 UTC acquired_at，不是 MQTT payload。
-
-模擬器支援 --host、--port、--device-id，預設 127.0.0.1:1502、Unit ID 1；read_once 的參數為 --host、--port、--device-id、--timeout，預設讀取 timeout 1 秒。這裡的 --device-id 是數值 Unit ID；publish_once 的 --device-id 則是字串邏輯設備 ID，數值改用 --unit-id。
-
-在終端 A 按 Ctrl+C 停止設備，再執行 read_once，預期 stderr 出現 connection_failed、沒有假量測，結束碼為 1。此案例是連線失敗，不代表已驗證建立連線後的真正讀取逾時。完整採集→MQTT→DB 流程見 [README](../README.md#快速開始)。
-
+單次讀取／發布 CLI 已移除，統一使用下方持續採集入口。只驗證設備讀取時，可執行 `.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_tcp.py -v`；測試會自行啟停獨立 port 的固定值模擬器，不需 MQTT 或 PostgreSQL。
 
 ## 8. Gateway 持續採集
 
 啟動模擬器與 receiver 後，另開終端執行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m gateway.poll --interval 5
+.\.venv\Scripts\python.exe -m gateway.main --interval 5
 ```
 
-第一輪立即執行，之後每輪讀取並本地保存才等待 interval 秒，間隔須為大於零的有限數。這是單台設備的循序採集，不建立重疊工作，也不補跑延遲的輪次。保留 gateway.publish_once 作為不使用本地佇列的單次診斷。
+第一輪立即執行，之後每輪讀取並本地保存才等待 interval 秒，間隔須為大於零的有限數。這是單台設備的循序採集，不建立重疊工作，也不補跑延遲的輪次。Gateway 僅提供持續採集入口。
 
 每輪成功讀取產生新 message_id 與 acquired_at，先保存至 SQLite；設備失聯、例外或解析失敗時不產生待送資料。獨立發布執行緒依入列順序補送，Broker 失敗或 PUBACK 未確認時保留並等待重試，不刷新原始 ID 或取得時間。容量滿時淘汰最舊記錄並記 log；實際磁碟寫入失敗則報錯退出。
 

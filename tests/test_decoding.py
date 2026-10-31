@@ -1,6 +1,6 @@
 import unittest
 
-from gateway.decoding import Measurement, decode_measurement
+from gateway.device.decoding import Measurement, decode_measurement
 
 
 class DecodeMeasurementTests(unittest.TestCase):

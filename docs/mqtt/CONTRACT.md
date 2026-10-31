@@ -112,7 +112,7 @@ UTF-8 JSON object；必填欄位如下，不允許 null、未知欄位、重複 
 
 此核心先固定 v1 欄位，未知欄位拒收；欄位結構、型別、單位或含義變更先更新 schema、範例、AsyncAPI 及本文件，明確討論相容性。對外不相容變更使用新 Topic 主版本及 schema_version，不靜默改寫 v1；本核心不預先建立動態 schema registry。
 
-`gateway.read_once` 的 stdout 是本機診斷輸出，不是 MQTT payload；其中數值型 device_id 是 Modbus ID。`gateway.publish_once` 已將它與字串型平台設備 ID 分開，數值 Unit ID 使用 --unit-id、邏輯設備 ID 使用 --device-id。
+`gateway/device/reader.py` 產生內部採集快照，再由 `gateway/messaging/telemetry.py` 組裝 MQTT payload。數值型 Modbus Unit ID 使用 --unit-id，字串型邏輯設備 ID 使用 --device-id；統一由 `gateway.main` 啟動。
 
 ## 9. 待實作驗收
 
@@ -230,19 +230,19 @@ docker compose logs --tail 30 mosquitto
 docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v1/devices/+/telemetry' -q 1 -v -d
 ```
 
-等工具收到 SUBACK 後，在模擬器與 Broker 運作時另開終端執行：
+等工具收到 SUBACK 後，在模擬器與 Broker 運作時另開終端啟動持續採集（已有 Gateway 執行時不要重複啟動）：
 
 ```powershell
-.\.venv\Scripts\python.exe -m gateway.publish_once
+.\.venv\Scripts\python.exe -m gateway.main
 ```
 
 -v 顯示 Topic 與 payload，-d 顯示協定 debug 訊息；PINGREQ／PINGRESP 是正常 keepalive。按 Ctrl+C 停止訂閱，省略 -d 可隱藏 debug 流量。mosquitto_sub 只觀察資料，不代替 receiver 的驗證與儲存。
 
 ### Gateway 與 receiver 參數
 
-publish_once 預設讀 127.0.0.1:1502、Unit ID 1，以 meter-001／gateway-001 發布至 127.0.0.1:1883。可用 --device-host、--device-port、--unit-id、--device-id、--gateway-id、--broker-host、--broker-port 覆寫；--read-timeout 預設 1 秒，--mqtt-timeout 預設 5 秒且上限 5 秒。完整參數可由 --help 查閱。
+Gateway 預設讀 127.0.0.1:1502、Unit ID 1，以 meter-001／gateway-001 發布至 127.0.0.1:1883。可用 --device-host、--device-port、--unit-id、--device-id、--gateway-id、--broker-host、--broker-port 覆寫；--read-timeout 預設 1 秒，--mqtt-timeout 預設 5 秒且上限 5 秒。完整參數可由 --help 查閱。
 
-MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整個 CLI 的總截止時間；使用 hostname 時，OS 的 DNS 解析也不保證受同一上限約束。等待 PUBACK 逾時記 publish_unconfirmed，不等於已知 Broker 沒收到。重新執行 publish_once 是新採集，會建立新 ID，且不自動重送舊訊息；gateway.poll 則保存量測並沿用原 ID 補送。
+MQTT timeout 各別約束 socket 連線、CONNACK 與 PUBACK 等待，不是整個 CLI 的總截止時間；使用 hostname 時，OS 的 DNS 解析也不保證受同一上限約束。等待 PUBACK 逾時記 publish_unconfirmed，不等於已知 Broker 沒收到。每輪新採集建立新 ID；待送資料保存於 SQLite，補送沿用原 ID。
 
 receiver 支援 --broker-host、--broker-port、--mqtt-timeout、--client-id；取得 QoS 1 SUBACK 後才印 receiver_ready，但這不保證 DB 可用。DB 連線沿用 DATABASE_URL 或 storage/database.py 的本機預設，不自動 migration。DB 例外沿 callback 錯誤通道傳回主執行緒並結束，不記成入庫成功；沒有本地緩衝或 DB 重試；重啟後可恢復 Broker 保留的訊息，詳見 [Receiver 恢復驗證](../verification/receiver-recovery.md)。
 
@@ -251,7 +251,7 @@ Pydantic model 是接收端執行的驗證，JSON Schema／AsyncAPI 是對外介
 
 ### 持續發布模式
 
-`gateway.poll` 與 publish_once 共用設備／Broker 參數，另有 --interval、--outbox、--max-pending、--retry-interval。啟動立即採集，採集與 SQLite 保存完成後等待 interval 秒；獨立執行緒依入列順序補送，不讓 MQTT 等待阻塞新採集。
+`gateway.main` 除設備／Broker 參數外，另有 --interval、--outbox、--max-pending、--retry-interval。啟動立即採集，採集與 SQLite 保存完成後等待 interval 秒；獨立執行緒依入列順序補送，不讓 MQTT 等待阻塞新採集。
 
 預設 data/<gateway-id>-outbox.sqlite3、容量 10000 筆、發布失敗等待 5 秒。取得成功 PUBACK 才從待送佇列移除；容量淘汰是明確例外，滿時移除最舊記錄並印 outbox_discarded 與實際丟棄筆數。telemetry_buffered 表示本地交易已提交，不代表已發布或入庫。
 

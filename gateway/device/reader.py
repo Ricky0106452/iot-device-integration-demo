@@ -1,15 +1,15 @@
-"""透過 Modbus TCP 單次讀值並解析；此模組尚不處理 MQTT 或資料儲存。"""
-import argparse
+"""設備採集：每輪讀取 Modbus、解析快照並關閉設備連線。"""
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
+from collections.abc import Callable
 import sys
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from gateway.decoding import decode_measurement
-from gateway.device_spec import MEASUREMENT_REGISTER_COUNT, MEASUREMENT_START_ADDRESS
+from gateway.device.decoding import decode_measurement
+from gateway.device.spec import MEASUREMENT_REGISTER_COUNT, MEASUREMENT_START_ADDRESS
 
 
 def report_failure(code: str, detail: str) -> int:
@@ -59,24 +59,21 @@ def read_snapshot(client: ModbusTcpClient, *, device_id: int) -> dict:
         client.close()
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Read one power-meter snapshot")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=1502)
-    parser.add_argument("--device-id", type=int, default=1)
-    parser.add_argument("--timeout", type=float, default=1.0)
-    args = parser.parse_args()
-    if not 1 <= args.port <= 65535 or args.timeout <= 0 or not 1 <= args.device_id <= 247:
-        parser.error("port must be 1..65535, timeout > 0, device-id 1..247")
+def acquire_and_handle(
+    client: ModbusTcpClient,
+    handle_snapshot: Callable[[dict], None],
+    *,
+    device_id: int,
+) -> int:
+    """只有成功讀取並解析的快照，才交給處理函式。
 
-    client = ModbusTcpClient(args.host, port=args.port, timeout=args.timeout, retries=0)
+    呼叫端傳入處理函式，例如組裝訊息並保存至本地待送佇列。
+    回傳 0 只表示處理函式正常結束，不代表 Broker 已收到。
+    處理函式的例外會向外傳遞，不將處理失敗誤分類成設備採集失敗。
+    """
     try:
-        snapshot = read_snapshot(client, device_id=args.device_id)
+        snapshot = read_snapshot(client, device_id=device_id)
     except AcquisitionError as exc:
         return report_failure(exc.code, str(exc))
-    print(json.dumps(snapshot, indent=2))
+    handle_snapshot(snapshot)
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

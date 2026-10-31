@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import paho.mqtt.client as mqtt
 
-from gateway.mqtt_publish import PublishError, publish_telemetry
+from gateway.messaging.publisher import PublishError, publish_telemetry
 
 
 class MqttPublishTests(unittest.TestCase):

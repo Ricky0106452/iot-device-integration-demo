@@ -5,7 +5,7 @@ import math
 import sys
 from threading import Event, Thread
 
-from gateway.mqtt_publish import PublishError
+from gateway.messaging.publisher import PublishError
 
 
 def context(message, topic):

@@ -84,7 +84,7 @@ services:
 
   gateway:
     <<: *app
-    command: ["python", "-m", "gateway.poll", "--device-host", "simulator", "--broker-host", "mosquitto", "--outbox", "/app/data/gateway-001-outbox.sqlite3"]
+    command: ["python", "-m", "gateway.main", "--device-host", "simulator", "--broker-host", "mosquitto", "--outbox", "/app/data/gateway-001-outbox.sqlite3"]
     volumes:
       - gateway-data:/app/data
     depends_on:

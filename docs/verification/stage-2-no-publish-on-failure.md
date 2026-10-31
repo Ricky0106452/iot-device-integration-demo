@@ -1,5 +1,7 @@
 # S2-01：設備無法連線時不發布
 
+> 歷史紀錄：以下保留當時檔名與驗證結果。目前 Gateway 統一使用 `python -m gateway.main`，單次診斷入口已移除；現行分工見 [README](../../README.md#gateway-程式分工)。
+
 日期：2026-10-22。狀態：流程層情境驗證通過；尚未接上 Paho 發布 adapter 或新的發布 CLI。
 
 ## 行為與規格

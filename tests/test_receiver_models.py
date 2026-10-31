@@ -7,7 +7,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from gateway.telemetry import build_telemetry
+from gateway.messaging.telemetry import build_telemetry
 from receiver.models import Telemetry
 
 ROOT = Path(__file__).resolve().parents[1]

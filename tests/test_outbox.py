@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from uuid import uuid4
 
-from gateway.outbox import Outbox
+from gateway.buffering.outbox import Outbox
 
 
 class OutboxTests(unittest.TestCase):

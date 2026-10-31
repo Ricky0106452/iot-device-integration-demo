@@ -13,7 +13,7 @@ from uuid import uuid4
 import paho.mqtt.client as mqtt
 from sqlmodel import Session, select
 
-from gateway.mqtt_publish import publish_telemetry
+from gateway.messaging.publisher import publish_telemetry
 from storage.database import create_db_engine
 from storage.device_setup import initialize_power_device
 from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading

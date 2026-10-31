@@ -1,5 +1,7 @@
 # Gateway 持續採集驗證
 
+> 歷史紀錄：以下保留當時檔名與驗證結果。目前 Gateway 統一使用 `python -m gateway.main`，單次診斷入口已移除；現行分工見 [README](../../README.md#gateway-程式分工)。
+
 日期：2026-10-24。此為初版輪詢的歷史紀錄；動態 simulator 與本地持久補送已另行完成，現行流程見 [Gateway 離線補送](gateway-offline-buffer.md)。
 
 ## 行為

@@ -8,9 +8,9 @@ from threading import Event, Thread
 import unittest
 from unittest.mock import Mock
 
-from gateway.mqtt_publish import PublishError
-from gateway.outbox import Outbox
-from gateway.outbox_sender import OutboxSender
+from gateway.messaging.publisher import PublishError
+from gateway.buffering.outbox import Outbox
+from gateway.buffering.sender import OutboxSender
 
 
 class OutboxSenderTests(unittest.TestCase):
