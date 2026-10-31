@@ -15,6 +15,7 @@ COPY gateway ./gateway
 COPY appsettings.json ./appsettings.json
 COPY config ./config
 COPY receiver ./receiver
+COPY receiver.appsettings.json ./receiver.appsettings.json
 COPY simulator ./simulator
 COPY storage ./storage
 COPY tests ./tests

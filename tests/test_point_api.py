@@ -16,7 +16,7 @@ from api.main import create_app
 from receiver.models import Telemetry
 from storage.database import create_db_engine
 from storage.device_setup import initialize_power_device
-from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading
+from storage.models import Device, MeasurementPoint, PointReading, ReceivedMessage
 from storage.telemetry import store_telemetry
 
 
@@ -51,9 +51,9 @@ class PointApiTests(unittest.TestCase):
 
     def cleanup_rows(self):
         with Session(self.engine) as session:
-            for entity in [PointReading, TelemetryReading, MeasurementPoint, Device]:
+            for entity in [PointReading, ReceivedMessage, MeasurementPoint, Device]:
                 for row in session.exec(select(entity).where(
-                    entity.device_id.in_([self.device_id, self.other_id]))).all():
+                    (entity.source_device_id if entity is ReceivedMessage else entity.device_id).in_([self.device_id, self.other_id]))).all():
                     session.delete(row)
                 session.flush()
             session.commit()
@@ -76,7 +76,7 @@ class PointApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["device_id"] for row in response.json()],
                          [row.device_id for row in expected[1:3]])
-        self.assertEqual(set(response.json()[0]), {"device_id", "name", "model_code"})
+        self.assertEqual(set(response.json()[0]), {"device_id", "name"})
 
     def test_points_are_discoverable_with_name_unit_and_resolution(self):
         response = self.client.get(f"/devices/{self.device_id}/points")
@@ -130,7 +130,7 @@ class PointApiTests(unittest.TestCase):
     def test_different_model_point_metadata_can_be_queried(self):
         # 只驗證資料模型與探索 API，不偽造水表原始快照或硬體整合。
         with Session(self.engine) as session:
-            session.add(Device(device_id=self.other_id + "-water", name="測試水表", model_code="TEST-WATER"))
+            session.add(Device(device_id=self.other_id + "-water", name="測試水表"))
             session.commit()
         water_id = self.other_id + "-water"
         def cleanup_water():

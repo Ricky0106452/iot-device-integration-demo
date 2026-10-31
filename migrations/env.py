@@ -4,10 +4,10 @@ import os
 from alembic import context
 
 from storage.database import DEFAULT_DATABASE_URL, create_db_engine
-from storage.models import TelemetryReading
+from storage.models import Device
 
 config = context.config
-target_metadata = TelemetryReading.metadata
+target_metadata = Device.metadata
 
 
 def migrate_connection(connection):

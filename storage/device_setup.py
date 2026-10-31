@@ -13,7 +13,6 @@ from receiver.models import IDENTIFIER_PATTERN
 from storage.database import DEFAULT_DATABASE_URL, create_db_engine
 from storage.models import Device, MeasurementPoint
 
-POWER_MODEL = "SIM-POWER-01"
 POWER_POINTS = {
     "voltage_v": ("電壓", "V", Decimal("0.1")),
     "current_a": ("電流", "A", Decimal("0.01")),
@@ -27,10 +26,10 @@ class DeviceConfigurationError(ValueError):
 
 
 def get_power_points(session: Session, device_id: str) -> dict[str, MeasurementPoint]:
-    """核對已設定模型、點位集合、單位與刻度，不變更任何設定。"""
+    """核對點位集合、單位與刻度，不變更任何設定。"""
     device = session.get(Device, device_id)
-    if device is None or device.model_code != POWER_MODEL:
-        raise DeviceConfigurationError("設備尚未設定為 SIM-POWER-01 電表")
+    if device is None:
+        raise DeviceConfigurationError("平台設備尚未登錄")
     points = session.exec(select(MeasurementPoint).where(
         MeasurementPoint.device_id == device_id)).all()
     mapped = {point.code: point for point in points}
@@ -38,7 +37,7 @@ def get_power_points(session: Session, device_id: str) -> dict[str, MeasurementP
         raise DeviceConfigurationError("電表必須預先設定完整且正確的四個量測點位")
     for code, (_, unit, resolution) in POWER_POINTS.items():
         if mapped[code].unit != unit or mapped[code].resolution != resolution:
-            raise DeviceConfigurationError(f"點位 {code} 的單位或解析度與設備模型不符")
+            raise DeviceConfigurationError(f"點位 {code} 的單位或解析度與 v1 電表規格不符")
     return mapped
 
 
@@ -48,11 +47,12 @@ def initialize_power_device(engine: Engine, device_id: str) -> None:
         raise ValueError("設備 ID 必須符合現有識別碼格式，長度 1～64")
     with Session(engine) as session:
         session.execute(insert(Device).values(
-            device_id=device_id, name=device_id, model_code=POWER_MODEL,
+            device_id=device_id, name=device_id,
         ).on_conflict_do_nothing(index_elements=["device_id"]))
-        device = session.get(Device, device_id)
-        if device.model_code != POWER_MODEL:
-            raise DeviceConfigurationError("不能把已設定的其他模型覆寫為電表")
+        existing = session.exec(select(MeasurementPoint).where(
+            MeasurementPoint.device_id == device_id)).all()
+        if any(point.code not in POWER_POINTS for point in existing):
+            raise DeviceConfigurationError("設備已存在其他點位，不自動改成 v1 電表配置")
         for code, (name, unit, resolution) in POWER_POINTS.items():
             session.execute(insert(MeasurementPoint).values(
                 point_id=uuid4(), device_id=device_id, code=code, name=name,

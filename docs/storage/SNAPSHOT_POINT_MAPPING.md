@@ -1,5 +1,7 @@
 # 採集快照與感測點映射規格
 
+> 歷史文件：固定電表快照已移除。舊快照接口回 410 Gone；現行資料只保存到 readings，查詢使用點位歷史 API。
+
 狀態：四步改版已完成，快照與點位值交易入庫、設備／點位查詢均已實作。本文保留設計與分步切換紀錄，早期「尚未實作／不可升版」是當時狀態；目前操作以 [README](../../README.md)、[資料結構](SCHEMA.md)與[切換驗證](../verification/measurement-point-cutover.md)為準。
 
 ## 1. telemetry_readings 的目標結構

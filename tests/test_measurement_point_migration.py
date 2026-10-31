@@ -10,7 +10,7 @@ from alembic.config import Config
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlmodel import Session
-from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading
+from storage.models import Device, MeasurementPoint, PointReading, ReceivedMessage
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
@@ -80,21 +80,23 @@ class MeasurementPointMigrationTests(unittest.TestCase):
                 self.assertEqual(value["received_at"], row["received_at"])
 
     def test_orm_metadata_matches_migrated_database(self):
+        command.upgrade(self.config, "head")
         context = MigrationContext.configure(self.connection, opts={"compare_type": True})
-        self.assertEqual(compare_metadata(context, TelemetryReading.metadata), [])
+        self.assertEqual(compare_metadata(context, Device.metadata), [])
 
     def test_orm_reads_backfilled_entities_and_json_snapshot(self):
         with Session(bind=self.connection, join_transaction_mode="create_savepoint") as session:
             device = session.get(Device, "migration-a")
-            self.assertEqual(device.model_code, "SIM-POWER-01")
+            self.assertEqual(self.connection.execute(text("SELECT model_code FROM devices WHERE device_id='migration-a'")).scalar_one(), "SIM-POWER-01")
             point = self.connection.execute(text("""SELECT point_id FROM measurement_points
                 WHERE device_id='migration-a' AND code='voltage_v'""")).scalar_one()
             mapped_point = session.get(MeasurementPoint, point)
             self.assertEqual(mapped_point.resolution, Decimal("0.1"))
             self.assertEqual(mapped_point.unit, "V")
-            value = session.get(PointReading, (point, self.ids[0]))
+            from types import SimpleNamespace
+            value = SimpleNamespace(**self.connection.execute(text("SELECT * FROM readings WHERE point_id=:point AND message_id=:message"), {"point":point,"message":self.ids[0]}).mappings().one())
             self.assertEqual(value.value, Decimal("230.1"))
-            snapshot = session.get(TelemetryReading, ("migration-a", self.ids[0]))
+            snapshot = SimpleNamespace(**self.connection.execute(text("SELECT * FROM telemetry_readings WHERE device_id='migration-a' AND message_id=:message"), {"message":self.ids[0]}).mappings().one())
             self.assertEqual(snapshot.source_data["raw_registers"], snapshot.raw_registers)
             self.assertEqual(snapshot.model_code, "SIM-POWER-01")
             self.assertEqual(value.acquired_at, snapshot.acquired_at)

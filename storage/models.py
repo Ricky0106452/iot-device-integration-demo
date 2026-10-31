@@ -2,44 +2,18 @@
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
-from typing import Any
 
-from sqlalchemy import (BigInteger, CheckConstraint, DateTime, ForeignKeyConstraint,
-                        Index, Integer, Numeric, Text, UniqueConstraint, text)
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy import (CheckConstraint, DateTime, ForeignKeyConstraint,
+                        Index, Numeric, UniqueConstraint, text)
 from sqlmodel import Field, SQLModel
 
 
-class TelemetryReading(SQLModel, table=True):
-    """一筆量測；複合主鍵防止同設備同資料 ID 重複新增。"""
-    __tablename__ = "telemetry_readings"
-
-    device_id: str = Field(primary_key=True, max_length=64)
-    message_id: UUID = Field(primary_key=True)
-    schema_version: int
-    gateway_id: str = Field(max_length=64)
-    acquired_at: datetime = Field(sa_type=DateTime(timezone=True))
-    received_at: datetime = Field(sa_type=DateTime(timezone=True))
-    raw_registers: list[int] = Field(sa_type=ARRAY(Integer))
-    # 小數位依設備倍率保存；這不是正常工作範圍的拒收門檻。
-    voltage_v: Decimal = Field(max_digits=5, decimal_places=1)
-    current_a: Decimal = Field(max_digits=5, decimal_places=2)
-    power_w: int
-    # UInt32 的最大電量大於 PostgreSQL INTEGER 上限，使用 BIGINT。
-    energy_wh: int = Field(sa_type=BigInteger)
-
-    # 過渡 migration 0002 尚未強制新入庫流程填入；切換後再收緊。
-    model_code: str | None = Field(default=None, max_length=64)
-    source_data: dict[str, Any] | None = Field(default=None, sa_type=JSONB(none_as_null=True))
-
-
 class Device(SQLModel, table=True):
-    """設備實例；模型識別用來選擇驗證與點位映射。"""
+    """平台管理的設備或邏輯群組；不承載來源協定與解碼模型。"""
     __tablename__ = "devices"
 
     device_id: str = Field(primary_key=True, max_length=64)
-    name: str = Field(sa_type=Text)
-    model_code: str = Field(max_length=64)
+    name: str = Field(min_length=1, max_length=100)
 
 
 class MeasurementPoint(SQLModel, table=True):
@@ -55,26 +29,66 @@ class MeasurementPoint(SQLModel, table=True):
     point_id: UUID = Field(primary_key=True)
     device_id: str = Field(max_length=64)
     code: str = Field(max_length=64)
-    name: str = Field(sa_type=Text)
+    name: str = Field(min_length=1, max_length=100)
     unit: str = Field(max_length=32)
     resolution: Decimal = Field(sa_type=Numeric())
 
 
 class PointReading(SQLModel, table=True):
-    """單一點位的歷史值；來源與點位必須屬於同一設備。"""
+    """統一的點位歷史；平台點位與來源訊息分離，不依賴電表快照。"""
     __tablename__ = "readings"
     __table_args__ = (
         ForeignKeyConstraint(["device_id", "point_id"],
             ["measurement_points.device_id", "measurement_points.point_id"], name="fk_readings_point"),
-        ForeignKeyConstraint(["device_id", "message_id"],
-            ["telemetry_readings.device_id", "telemetry_readings.message_id"], name="fk_readings_snapshot"),
-        Index("ix_readings_point_time", "point_id", text("acquired_at DESC"), text("message_id DESC")),
+        ForeignKeyConstraint(["receipt_id"], ["received_messages.receipt_id"], name="fk_readings_receipt"),
+        Index("ix_readings_point_time", "point_id", text("acquired_at DESC"), text("message_id DESC"), text("receipt_id DESC")),
+        Index("ix_readings_receipt", "receipt_id"),
     )
-
     point_id: UUID = Field(primary_key=True)
-    message_id: UUID = Field(primary_key=True)
+    receipt_id: UUID = Field(primary_key=True)
+    message_id: UUID
     device_id: str = Field(max_length=64)
+    source_code: str = Field(max_length=64)
     acquired_at: datetime = Field(sa_type=DateTime(timezone=True))
     received_at: datetime = Field(sa_type=DateTime(timezone=True))
-    # 不指定固定 scale，避免不同設備的合法小數被 DB 捨入。
     value: Decimal = Field(sa_type=Numeric())
+
+
+class SourceBinding(SQLModel, table=True):
+    """接收端來源識別與平台點位的綁定，不含設備通訊細節。"""
+    __tablename__ = "source_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(["point_id"], ["measurement_points.point_id"], name="fk_bindings_point"),
+        UniqueConstraint("receiver_id", "topic", "source_gateway_id", "source_device_id", "source_code",
+                         name="uq_bindings_source"),
+        UniqueConstraint("receiver_id", "topic", "source_gateway_id", "source_device_id", "point_id",
+                         name="uq_bindings_stream_point"),
+        Index("ix_bindings_point", "point_id"),
+    )
+    binding_id: UUID = Field(primary_key=True)
+    receiver_id: str = Field(max_length=64)
+    topic: str = Field(max_length=512)
+    source_gateway_id: str = Field(max_length=64)
+    source_device_id: str = Field(max_length=64)
+    source_code: str = Field(max_length=64)
+    point_id: UUID
+
+
+class ReceivedMessage(SQLModel, table=True):
+    """最小接收收據；來源識別與完整性指紋，不保存 payload 或重複讀值。"""
+    __tablename__ = "received_messages"
+    __table_args__ = (
+        UniqueConstraint("receiver_id", "topic", "source_gateway_id", "source_device_id", "message_id",
+                         name="uq_received_message_source"),
+    )
+    receipt_id: UUID = Field(primary_key=True)
+    receiver_id: str = Field(max_length=64)
+    topic: str = Field(max_length=512)
+    source_gateway_id: str = Field(max_length=64)
+    source_device_id: str = Field(max_length=64)
+    message_id: UUID
+    acquired_at: datetime = Field(sa_type=DateTime(timezone=True))
+    received_at: datetime = Field(sa_type=DateTime(timezone=True))
+    content_hash: str = Field(max_length=64)
+    readings_hash: str = Field(max_length=64)
+    reading_count: int = Field(ge=0)

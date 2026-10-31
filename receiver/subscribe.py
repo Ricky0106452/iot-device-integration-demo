@@ -78,10 +78,14 @@ class ReceiverError(Exception):
         self.code = code
 
 
-def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, ready_file=None) -> int:
+def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, ready_file=None,
+                 message_handler=handle_message, topic_filters=None) -> int:
     """等待連線與訂閱確認後持續接收；結束時清理傳入的 client。"""
     if not math.isfinite(timeout) or not 0 < timeout <= 5:
         raise ValueError("等待秒數必須大於 0 且不超過 5")
+    filters = tuple(topic_filters) if topic_filters is not None else (TOPIC_FILTER,)
+    if not filters:
+        raise ValueError("至少需要一個訂閱 Topic")
     ready_path = Path(ready_file) if ready_file is not None else None
     if ready_path is not None:
         # 容器重啟不可沿用前次的就緒標記；僅 SUBACK 通過後建立。
@@ -101,7 +105,8 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, rea
 
     def on_subscribe(client, userdata, mid, reason_codes, properties):
         nonlocal subscription_accepted
-        subscription_accepted = len(reason_codes) == 1 and reason_codes[0].value == 1
+        subscription_accepted = (len(reason_codes) == len(filters)
+                                 and all(code.value == 1 for code in reason_codes))
         subscribed.set()
 
     def on_disconnect(client, userdata, flags, reason_code, properties):
@@ -112,7 +117,7 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, rea
         if stopped.is_set():
             return
         try:
-            handle_message(message.topic, message.payload, store=store)
+            message_handler(message.topic, message.payload, store=store)
             # store 回傳時交易已提交；已記錄的拒收也完成處置，不無限重送。
             rc = client.ack(message.mid, message.qos)
             if rc != mqtt.MQTT_ERR_SUCCESS:
@@ -137,7 +142,8 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, rea
             raise ReceiverError("broker_connack_timeout", "未在期限內取得 CONNACK")
         if connection_rejected:
             raise ReceiverError("broker_connection_rejected", "Broker 拒絕連線")
-        rc, mid = client.subscribe(TOPIC_FILTER, qos=1)
+        rc, mid = (client.subscribe(filters[0], qos=1) if len(filters) == 1
+                   else client.subscribe([(topic, 1) for topic in filters]))
         if rc != mqtt.MQTT_ERR_SUCCESS:
             raise ReceiverError("subscription_failed", f"subscribe rc={rc}")
         if not subscribed.wait(timeout):
@@ -146,7 +152,7 @@ def run_receiver(client, *, store, host="127.0.0.1", port=1883, timeout=5.0, rea
             raise ReceiverError("subscription_rejected", "未獲授要求的 QoS 1")
         if ready_path is not None:
             ready_path.write_text("subscribed", encoding="utf-8")
-        print(json.dumps({"event": "receiver_ready", "topic_filter": TOPIC_FILTER,
+        print(json.dumps({"event": "receiver_ready", "topic_filter": filters[0], "topic_filters": list(filters),
                           "qos": 1, "session_present": session_present}), flush=True)
         # 使用有期限的等待，讓主執行緒能定期處理 Ctrl+C。
         while not stopped.wait(0.2):

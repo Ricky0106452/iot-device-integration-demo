@@ -49,7 +49,7 @@ scale/offset 可填 JSON 數字或十進位字串，推薦字串避免設定精�
 
 `mqtt`：host、port、timeout_seconds（大於 0、最多 5 秒）、topic_prefix（預設 `okgo/demo/v2`），可選 username/password。固定 QoS 1、retain=false。尚未新增 TLS 與憑證設定。
 
-Topic 為 `<topic_prefix>/devices/<device_id>/telemetry`，prefix 不可含萬用字元，禁止使用舊 `okgo/demo/v1` 前綴。v2 訊息與 Receiver 的 v1 不相容；本階段驗收到 Broker，ACK 不是入庫確認。
+Topic 為 `<topic_prefix>/devices/<device_id>/telemetry`，prefix 不可含萬用字元，禁止使用舊 `okgo/demo/v1` 前綴。v2 訊息由新版 Receiver 的獨立來源映射處理；舊 v1 接收入口仍不相容。Gateway 的 PUBACK 不是入庫確認。
 
 `buffer`：path、max_pending、retry_interval_seconds。相對路徑以設定檔目錄為準。已入列資料的 Topic、ID、值與時間在重試時保持原樣；改設定不改寫已保存訊息。預設新 v2 檔案與舊 v1 分開，請保留舊檔並另外處理，勿以新讀值取代舊待送資料。
 

@@ -1,0 +1,33 @@
+{
+  "receiver_id": "rx-points-001",
+  "database_url": "postgresql+psycopg://iot_demo:iot_demo_local@127.0.0.1:15433/iot_demo",
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "timeout_seconds": 5
+  },
+  "platform_devices": [
+    {
+      "device_id": "building-001",
+      "name": "一樓",
+      "points": [
+        {
+          "code": "temp1",
+          "name": "一樓室溫",
+          "unit": "degC",
+          "resolution": "0.1"
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "topic": "factory/room/environment",
+      "source_gateway_id": "gateway-001",
+      "source_device_id": "sensor-002",
+      "source_code": "temp2",
+      "target_device_id": "building-001",
+      "target_point_code": "temp1"
+    }
+  ]
+}

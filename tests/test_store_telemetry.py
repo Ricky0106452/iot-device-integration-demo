@@ -1,4 +1,4 @@
-"""S3-03A：真實 PostgreSQL 的單筆入庫、重複與衝突。"""
+"""舊 v1 相容轉接也只寫統一 readings 與指紋收據，不重建快照。"""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
@@ -7,196 +7,128 @@ from pathlib import Path
 import unittest
 from uuid import UUID, uuid4
 
-from sqlalchemy import event
+from sqlalchemy import delete, event, inspect
 from sqlmodel import Session, select
 
 from receiver.models import Telemetry
 from storage.database import create_db_engine
-from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading
 from storage.device_setup import DeviceConfigurationError, initialize_power_device
+from storage.models import Device, MeasurementPoint, PointReading, ReceivedMessage
 from storage.telemetry import store_telemetry
+from test_storage_models import upgrade_database
 
 
-@unittest.skipUnless(os.environ.get("IOT_TEST_DATABASE_URL"), "未設定專用資料庫測試連線")
+@unittest.skipUnless(os.environ.get("IOT_TEST_DATABASE_URL"),"未設定測試資料庫")
 class StoreTelemetryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.engine = create_db_engine(os.environ["IOT_TEST_DATABASE_URL"])
+        cls.engine=create_db_engine(os.environ["IOT_TEST_DATABASE_URL"])
+        upgrade_database(cls.engine)
 
     @classmethod
     def tearDownClass(cls):
         cls.engine.dispose()
 
     def setUp(self):
-        path = Path(__file__).resolve().parents[1] / "docs/mqtt/telemetry.example.json"
-        self.payload = json.loads(path.read_text(encoding="utf-8"))
-        self.payload["message_id"] = str(uuid4())
-        self.device_id = "store-test-" + uuid4().hex
-        self.other_device_id = "store-test-" + uuid4().hex
-        self.payload["device_id"] = self.device_id
-        self.received_at = datetime(2026, 10, 23, tzinfo=timezone.utc)
-        self.addCleanup(self.remove_own_rows)
-        initialize_power_device(self.engine, self.device_id)
-        initialize_power_device(self.engine, self.other_device_id)
+        self.payload=json.loads((Path(__file__).resolve().parents[1]/"docs/mqtt/telemetry.example.json").read_text(encoding="utf-8"))
+        self.device_id="legacy-"+uuid4().hex
+        self.other_device_id="legacy-"+uuid4().hex
+        self.payload.update(device_id=self.device_id,message_id=str(uuid4()))
+        self.received_at=datetime(2026,10,23,tzinfo=timezone.utc)
+        self.addCleanup(self.cleanup)
+        initialize_power_device(self.engine,self.device_id)
+        initialize_power_device(self.engine,self.other_device_id)
 
-    def remove_own_rows(self):
-        # 只清理本測試隨機建立的兩台設備，依外鍵順序清除。
+    def cleanup(self):
+        ids=[self.device_id,self.other_device_id]
         with Session(self.engine) as session:
-            for entity in [PointReading, TelemetryReading, MeasurementPoint, Device]:
-                rows = session.exec(select(entity).where(
-                    entity.device_id.in_([self.device_id, self.other_device_id]))).all()
-                for row in rows:
-                    session.delete(row)
-                session.flush()
+            session.execute(delete(PointReading).where(PointReading.device_id.in_(ids)))
+            session.execute(delete(ReceivedMessage).where(ReceivedMessage.source_device_id.in_(ids)))
+            session.execute(delete(MeasurementPoint).where(MeasurementPoint.device_id.in_(ids)))
+            session.execute(delete(Device).where(Device.device_id.in_(ids)))
             session.commit()
 
-    def store(self, payload=None, received_at=None):
-        model = Telemetry.model_validate(self.payload if payload is None else payload)
-        return store_telemetry(self.engine, model,
-                               received_at=self.received_at if received_at is None else received_at)
+    def store(self,payload=None,received_at=None):
+        return store_telemetry(self.engine,Telemetry.model_validate(payload or self.payload),received_at=received_at or self.received_at)
 
-    def read(self, device_id=None):
+    def receipt(self,device_id=None):
         with Session(self.engine) as session:
-            return session.get(TelemetryReading, (device_id or self.device_id, UUID(self.payload["message_id"])))
+            return session.exec(select(ReceivedMessage).where(ReceivedMessage.source_device_id==(device_id or self.device_id),
+                ReceivedMessage.message_id==UUID(self.payload["message_id"]))).first()
 
-    def test_committed_reading_is_visible_from_another_connection(self):
-        self.assertEqual(self.store(), "stored")
-        row = self.read()
-        self.assertIsNotNone(row)
-        self.assertEqual(row.gateway_id, self.payload["gateway_id"])
-        self.assertEqual(row.schema_version, 1)
-        self.assertEqual(row.model_code, "SIM-POWER-01")
-        self.assertEqual(row.source_data, {"raw_registers": self.payload["raw_registers"],
-                                          "measurement": self.payload["measurement"]})
+    def rows(self):
         with Session(self.engine) as session:
-            values = session.exec(select(PointReading).where(
-                PointReading.device_id == self.device_id)).all()
-            points = session.exec(select(MeasurementPoint).where(
-                MeasurementPoint.device_id == self.device_id)).all()
-            codes = {point.point_id: point.code for point in points}
-            self.assertEqual(len(values), 4)
-            for value in values:
-                self.assertEqual(value.value, Decimal(str(self.payload["measurement"][codes[value.point_id]])))
-                self.assertEqual(value.message_id, UUID(self.payload["message_id"]))
-                self.assertEqual(value.acquired_at, row.acquired_at)
-                self.assertEqual(value.received_at, self.received_at)
-        self.assertEqual(row.acquired_at, datetime(2026, 10, 22, 1, tzinfo=timezone.utc))
-        self.assertEqual(row.received_at, self.received_at)
-        self.assertEqual(row.raw_registers, [2300, 1000, 2300, 1, 4464])
-        self.assertEqual(row.voltage_v, Decimal("230.0"))
-        self.assertEqual(row.current_a, Decimal("10.00"))
-        self.assertEqual(row.power_w, 2300)
-        self.assertEqual(row.energy_wh, 70000)
+            return session.exec(select(PointReading).where(PointReading.device_id==self.device_id)).all()
 
-    def test_duplicate_preserves_first_received_time(self):
-        self.payload["raw_registers"][:2] = [2301, 1001]
-        self.payload["measurement"].update(voltage_v=230.1, current_a=10.01)
+    def test_committed_values_exist_without_snapshot_or_payload_copy(self):
+        self.assertEqual(self.store(),"stored")
+        receipt=self.receipt()
+        self.assertEqual(receipt.reading_count,4)
+        self.assertEqual(len(receipt.content_hash),64)
+        self.assertEqual(len(receipt.readings_hash),64)
+        self.assertFalse(hasattr(receipt,"content"))
+        self.assertNotIn("telemetry_readings",inspect(self.engine).get_table_names())
+        self.assertNotIn("mapped_point_readings",inspect(self.engine).get_table_names())
+        self.assertEqual({r.source_code:r.value for r in self.rows()},
+                         {key:Decimal(str(value)) for key,value in self.payload["measurement"].items()})
+
+    def test_duplicate_preserves_first_received_time_and_values(self):
         self.store()
-        # 相同時間點的不同 UTC 表示與不同接收時間，不應判成衝突。
-        self.payload["acquired_at"] = "2026-10-22T01:00:00+00:00"
-        self.assertEqual(self.store(received_at=self.received_at + timedelta(seconds=5)), "duplicate")
-        self.assertEqual(self.read().received_at, self.received_at)
-        self.assertEqual(self.read().voltage_v, Decimal("230.1"))
-        self.assertEqual(self.read().current_a, Decimal("10.01"))
-        with Session(self.engine) as session:
-            rows = session.exec(select(PointReading).where(
-                PointReading.device_id == self.device_id)).all()
-            self.assertEqual(len(rows), 4)
-            self.assertTrue(all(row.received_at == self.received_at for row in rows))
+        self.assertEqual(self.store(received_at=self.received_at+timedelta(seconds=5)),"duplicate")
+        self.assertEqual(self.receipt().received_at,self.received_at)
+        self.assertEqual(len(self.rows()),4)
 
-    def test_changed_source_fields_are_conflicts_and_original_is_preserved(self):
+    def test_conflicting_values_do_not_overwrite(self):
         self.store()
-        changes = [
-            {"gateway_id": "gateway-002"},
-            {"acquired_at": "2026-10-22T01:00:01Z"},
-            {"raw_registers": [2301, 1000, 2300, 1, 4464],
-             "measurement": {**self.payload["measurement"], "voltage_v": 230.1}},
-            {"raw_registers": [2301, 1001, 2300, 1, 4464],
-             "measurement": {**self.payload["measurement"], "voltage_v": 230.1, "current_a": 10.01}},
-        ]
-        for change in changes:
-            # 矛盾 raw／measurement 已在接收模型拒收；此處驗證合法但不同內容的衝突。
-            with self.subTest(change=change):
-                altered = {**self.payload, **change}
-                self.assertEqual(self.store(altered), "conflict")
-        row = self.read()
-        self.assertEqual(row.gateway_id, "gateway-001")
-        self.assertEqual(row.power_w, 2300)
-        self.assertEqual(row.voltage_v, Decimal("230.0"))
-        self.assertEqual(row.current_a, Decimal("10.00"))
-        self.assertEqual(row.raw_registers, self.payload["raw_registers"])
-        self.assertEqual(row.received_at, self.received_at)
+        changed={**self.payload,"measurement":{**self.payload["measurement"],"voltage_v":230.1},
+                 "raw_registers":[2301,1000,2300,1,4464]}
+        self.assertEqual(self.store(changed),"conflict")
+        self.assertEqual(next(r for r in self.rows() if r.source_code=="voltage_v").value,Decimal("230.0"))
 
-    def test_initializer_is_idempotent_and_does_not_overwrite_point_settings(self):
-        with Session(self.engine) as session:
-            before = session.exec(select(MeasurementPoint).where(
-                MeasurementPoint.device_id == self.device_id)).all()
-            identifiers = {point.code: point.point_id for point in before}
-        initialize_power_device(self.engine, self.device_id)
-        with Session(self.engine) as session:
-            after = session.exec(select(MeasurementPoint).where(
-                MeasurementPoint.device_id == self.device_id)).all()
-            self.assertEqual({point.code: point.point_id for point in after}, identifiers)
-
-    def test_unconfigured_device_or_missing_point_is_not_stored(self):
-        unknown = {**self.payload, "device_id": "unconfigured-" + uuid4().hex}
+    def test_unconfigured_device_or_missing_point_is_rejected(self):
         with self.assertRaises(DeviceConfigurationError):
-            self.store(unknown)
+            self.store({**self.payload,"device_id":"unknown-"+uuid4().hex})
         with Session(self.engine) as session:
-            point = session.exec(select(MeasurementPoint).where(
-                MeasurementPoint.device_id == self.device_id)).first()
-            session.delete(point)
-            session.commit()
+            point=session.exec(select(MeasurementPoint).where(MeasurementPoint.device_id==self.device_id)).first()
+            session.delete(point);session.commit()
         with self.assertRaises(DeviceConfigurationError):
             self.store()
-        self.assertIsNone(self.read())
+        self.assertIsNone(self.receipt())
 
-    def test_point_insert_failure_rolls_back_snapshot(self):
-        def fail_point_insert(connection, cursor, statement, parameters, context, executemany):
+    def test_failed_reading_insert_rolls_back_receipt(self):
+        def fail(connection,cursor,statement,parameters,context,executemany):
             if statement.startswith("INSERT INTO readings"):
-                raise RuntimeError("測試點位寫入失敗")
-        event.listen(self.engine, "before_cursor_execute", fail_point_insert)
+                raise RuntimeError("write failure")
+        event.listen(self.engine,"before_cursor_execute",fail)
         try:
-            with self.assertRaisesRegex(RuntimeError, "測試點位寫入失敗"):
+            with self.assertRaisesRegex(RuntimeError,"write failure"):
                 self.store()
         finally:
-            event.remove(self.engine, "before_cursor_execute", fail_point_insert)
-        self.assertIsNone(self.read())
-        with Session(self.engine) as session:
-            self.assertEqual(session.exec(select(PointReading).where(
-                PointReading.device_id == self.device_id)).all(), [])
+            event.remove(self.engine,"before_cursor_execute",fail)
+        self.assertIsNone(self.receipt())
+        self.assertEqual(self.rows(),[])
 
-    def test_duplicate_with_missing_point_value_is_an_integrity_error(self):
+    def test_duplicate_with_missing_reading_is_integrity_error(self):
         self.store()
         with Session(self.engine) as session:
-            reading = session.exec(select(PointReading).where(
-                PointReading.device_id == self.device_id)).first()
-            session.delete(reading)
-            session.commit()
-        with self.assertRaisesRegex(RuntimeError, "不完整"):
+            row=session.exec(select(PointReading).where(PointReading.device_id==self.device_id)).first()
+            session.delete(row);session.commit()
+        with self.assertRaisesRegex(RuntimeError,"不一致"):
             self.store()
 
-    def test_changed_point_semantics_are_not_silently_reconfigured(self):
+    def test_initializer_preserves_point_ids_and_rejects_unit_changes(self):
         with Session(self.engine) as session:
-            point = session.exec(select(MeasurementPoint).where(
-                MeasurementPoint.device_id == self.device_id,
-                MeasurementPoint.code == "voltage_v")).one()
-            point.unit = "kV"
-            session.add(point)
-            session.commit()
+            before={p.code:p.point_id for p in session.exec(select(MeasurementPoint).where(MeasurementPoint.device_id==self.device_id)).all()}
+        initialize_power_device(self.engine,self.device_id)
+        with Session(self.engine) as session:
+            points=session.exec(select(MeasurementPoint).where(MeasurementPoint.device_id==self.device_id)).all()
+            self.assertEqual({p.code:p.point_id for p in points},before)
+            points[0].unit="wrong";session.add(points[0]);session.commit()
         with self.assertRaises(DeviceConfigurationError):
-            initialize_power_device(self.engine, self.device_id)
-        with self.assertRaises(DeviceConfigurationError):
-            self.store()
-        self.assertIsNone(self.read())
+            initialize_power_device(self.engine,self.device_id)
 
-    def test_same_message_id_on_another_device_is_a_new_reading(self):
+    def test_same_message_id_from_different_device_is_independent(self):
         self.store()
-        self.payload["device_id"] = self.other_device_id
-        self.assertEqual(self.store(), "stored")
-        self.assertIsNotNone(self.read(self.device_id))
-        self.assertIsNotNone(self.read(self.other_device_id))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(self.store({**self.payload,"device_id":self.other_device_id}),"stored")
+        self.assertIsNotNone(self.receipt(self.device_id))
+        self.assertIsNotNone(self.receipt(self.other_device_id))

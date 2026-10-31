@@ -129,7 +129,7 @@ Host、Port、Device／Unit ID、輪詢間隔與逾時由設定提供，不寫�
 
 通道、設備、點位與 MQTT 都來自設定檔，不再接受命令列參數。多設備、串列通道、排程與保存規則見 [設定說明](gateway/CONFIGURATION.md)。觀察 Topic 改為 `okgo/demo/v2/devices/+/telemetry`。
 
-Receiver 仍使用 v1 電表契約，因此新版 Gateway 的訊息目前驗收到 MQTT，未接入 DB/API。下方動態模擬器紀錄保留當時測試結果。
+新版 receiver.main 已依來源映射將 Gateway v2 寫入 PostgreSQL，點位歷史 API 已可查詢統一 readings；receiver.subscribe 保留 v1 輸入相容轉接，不保存快照。下方動態模擬器紀錄保留當時測試結果。
 
 ## 9. 動態模擬器驗證（2026-10-24）
 

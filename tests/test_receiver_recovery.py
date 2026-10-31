@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from gateway.messaging.publisher import publish_telemetry
 from storage.database import create_db_engine
 from storage.device_setup import initialize_power_device
-from storage.models import Device, MeasurementPoint, PointReading, TelemetryReading
+from storage.models import Device, MeasurementPoint, PointReading, ReceivedMessage
 
 ROOT = Path(__file__).resolve().parents[1]
 # 暫停點只存在測試子程序，不在正式程式加入故障注入開關。
@@ -78,8 +78,8 @@ class ReceiverRecoveryTests(unittest.TestCase):
             client.disconnect()
         finally:
             with Session(self.engine) as session:
-                for entity in [PointReading, TelemetryReading, MeasurementPoint, Device]:
-                    for row in session.exec(select(entity).where(entity.device_id == self.device_id)).all():
+                for entity in [PointReading, ReceivedMessage, MeasurementPoint, Device]:
+                    for row in session.exec(select(entity).where((entity.source_device_id if entity is ReceivedMessage else entity.device_id) == self.device_id)).all():
                         session.delete(row)
                     session.flush()
                 session.commit()
@@ -135,8 +135,8 @@ class ReceiverRecoveryTests(unittest.TestCase):
 
     def assert_rows(self, snapshots, points):
         with Session(self.engine) as session:
-            self.assertEqual(len(session.exec(select(TelemetryReading).where(
-                TelemetryReading.device_id == self.device_id)).all()), snapshots)
+            self.assertEqual(len(session.exec(select(ReceivedMessage).where(
+                ReceivedMessage.source_device_id == self.device_id)).all()), snapshots)
             self.assertEqual(len(session.exec(select(PointReading).where(
                 PointReading.device_id == self.device_id)).all()), points)
 

@@ -1,0 +1,76 @@
+{
+  "receiver_id": "rx-points-001",
+  "database_url": "postgresql+psycopg://iot_demo:iot_demo_local@postgres:5432/iot_demo",
+  "mqtt": {
+    "host": "mosquitto",
+    "port": 1883,
+    "timeout_seconds": 5
+  },
+  "platform_devices": [
+    {
+      "device_id": "site-001",
+      "name": "展示場域",
+      "points": [
+        {
+          "code": "supply-voltage",
+          "name": "供電電壓",
+          "unit": "V",
+          "resolution": "0.1"
+        },
+        {
+          "code": "supply-current",
+          "name": "供電電流",
+          "unit": "A",
+          "resolution": "0.01"
+        },
+        {
+          "code": "active-power",
+          "name": "有功功率",
+          "unit": "W",
+          "resolution": "1"
+        },
+        {
+          "code": "total-energy",
+          "name": "累積電量",
+          "unit": "Wh",
+          "resolution": "1"
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "topic": "okgo/demo/v2/devices/meter-001/telemetry",
+      "source_gateway_id": "gateway-001",
+      "source_device_id": "meter-001",
+      "source_code": "voltage",
+      "target_device_id": "site-001",
+      "target_point_code": "supply-voltage"
+    },
+    {
+      "topic": "okgo/demo/v2/devices/meter-001/telemetry",
+      "source_gateway_id": "gateway-001",
+      "source_device_id": "meter-001",
+      "source_code": "current",
+      "target_device_id": "site-001",
+      "target_point_code": "supply-current"
+    },
+    {
+      "topic": "okgo/demo/v2/devices/meter-001/telemetry",
+      "source_gateway_id": "gateway-001",
+      "source_device_id": "meter-001",
+      "source_code": "power",
+      "target_device_id": "site-001",
+      "target_point_code": "active-power"
+    },
+    {
+      "topic": "okgo/demo/v2/devices/meter-001/telemetry",
+      "source_gateway_id": "gateway-001",
+      "source_device_id": "meter-001",
+      "source_code": "energy",
+      "target_device_id": "site-001",
+      "target_point_code": "total-energy"
+    }
+  ],
+  "ready_file": "/tmp/receiver.ready"
+}

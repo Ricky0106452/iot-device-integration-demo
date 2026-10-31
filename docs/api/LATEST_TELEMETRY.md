@@ -1,5 +1,7 @@
 # 最新量測查詢
 
+> 歷史文件：固定電表快照已移除。舊快照接口回 410 Gone；現行資料只保存到 readings，查詢使用點位歷史 API。
+
 ## S3-04：查詢設備最新一筆量測
 
 GET /devices/{device_id}/telemetry/latest

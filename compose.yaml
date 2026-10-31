@@ -69,10 +69,11 @@ services:
 
   receiver:
     <<: *app
-    environment: *database-env
-    command: ["python", "-m", "receiver.subscribe", "--broker-host", "mosquitto", "--ready-file", "/tmp/receiver.ready"]
+    command: ["python", "-m", "receiver.main"]
+    volumes:
+      - ./config/receiver.docker.json:/app/receiver.appsettings.json:ro
     depends_on:
-      device-setup:
+      migrate:
         condition: service_completed_successfully
       mosquitto:
         condition: service_healthy
@@ -91,7 +92,7 @@ services:
     depends_on:
       simulator:
         condition: service_healthy
-      mosquitto:
+      receiver:
         condition: service_healthy
 
   api:

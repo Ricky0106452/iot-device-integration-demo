@@ -1,6 +1,6 @@
 # Gateway 通用點位訊息 v2
 
-本階段僅 Gateway 發布與 Broker 接收；既有 Receiver 只訂閱電表 v1，不處理本契約。尚未調整資料庫/API，也未宣稱 v2 已入庫。
+Receiver 現在依 [獨立來源映射](../receiver/SOURCE_MAPPING.md) 接收本契約，將來源 code 對應平台 point_id，交易入庫後 ACK。點位歷史 API 直接讀取統一 readings；固定快照 API 已退場，v1 輸入相容轉接仍保留。
 
 Topic：`<topic_prefix>/devices/<device_id>/telemetry`，預設前綴 `okgo/demo/v2`。固定 MQTT 3.1.1、QoS 1、retain=false。
 
