@@ -1,5 +1,7 @@
 # 模擬電力設備規格 v1
 
+> 本文件的 SIM-POWER-01 配置是模擬電表規格，不是所有設備共用的配置。新版 Gateway 的設備與點位改由 [JSON 設定](gateway/CONFIGURATION.md) 提供；固定電表解碼器已移除。
+
 - 狀態：固定／動態讀值與 Gateway 持續輪詢已實作；設定寫入與完整故障恢復為後續目標。驗證結果見[階段 1 紀錄](verification/stage-1-fixed-read.md)。
 - 日期：2026-10-21；資料保留規則於 2026-10-22 修訂。
 - 模型：SIM-POWER-01，單相、僅正向用電的可限功率模擬負載。
@@ -115,26 +117,19 @@ Host、Port、Device／Unit ID、輪詢間隔與逾時由設定提供，不寫�
 
 ## 7. 設備讀取與解析
 
-設備讀取邏輯位於 `gateway/device/reader.py`，暫存器規格與解碼分別位於同資料夾的 `spec.py`、`decoding.py`。讀取成功才產生快照，失敗會關閉設備連線且不產生假量測。
+本文件的位址 0..4 描述模擬電表本身。Gateway 現在依 JSON 的各點位設定分別讀取，沒有共用的固定起始位址或 count。預設電表點位已放入專案根目錄 `appsettings.json`。
 
-單次讀取／發布 CLI 已移除，統一使用下方持續採集入口。只驗證設備讀取時，可執行 `.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_tcp.py -v`；測試會自行啟停獨立 port 的固定值模擬器，不需 MQTT 或 PostgreSQL。
+`gateway/device/spec.py` 定義點位設定；`reader.py` 執行 TCP/RTU 讀取；`decoding.py` 處理型別、byte/word order、倍率與偏移。點位失敗不補零，其他成功點位仍可發送，每點有自己的取得時間。
 
 ## 8. Gateway 持續採集
 
-啟動模擬器與 receiver 後，另開終端執行：
-
 ```powershell
-.\.venv\Scripts\python.exe -m gateway.main --interval 5
+.\.venv\Scripts\python.exe -m gateway.main
 ```
 
-第一輪立即執行，之後每輪讀取並本地保存才等待 interval 秒，間隔須為大於零的有限數。這是單台設備的循序採集，不建立重疊工作，也不補跑延遲的輪次。Gateway 僅提供持續採集入口。
+通道、設備、點位與 MQTT 都來自設定檔，不再接受命令列參數。多設備、串列通道、排程與保存規則見 [設定說明](gateway/CONFIGURATION.md)。觀察 Topic 改為 `okgo/demo/v2/devices/+/telemetry`。
 
-每輪成功讀取產生新 message_id 與 acquired_at，先保存至 SQLite；設備失聯、例外或解析失敗時不產生待送資料。獨立發布執行緒依入列順序補送，Broker 失敗或 PUBACK 未確認時保留並等待重試，不刷新原始 ID 或取得時間。容量滿時淘汰最舊記錄並記 log；實際磁碟寫入失敗則報錯退出。
-
-按 Ctrl+C 停止採集，等待當次發布完成並關閉資源，不強制排空；下次啟動沿用同一 SQLite 補送。非預期程式錯誤不吞掉，仍會結束程序。各次設備讀取與發布仍建立／關閉各自連線，尚未改成常駐連線或多設備排程。
-
-現行行為見 [Gateway 離線補送](verification/gateway-offline-buffer.md)，原始輪詢階段見 [歷史紀錄](verification/gateway-polling.md)。simulator 預設每 5 秒更新動態快照；採集與更新各自排程，不保證每次讀取都剛好對應一次更新。
-
+Receiver 仍使用 v1 電表契約，因此新版 Gateway 的訊息目前驗收到 MQTT，未接入 DB/API。下方動態模擬器紀錄保留當時測試結果。
 
 ## 9. 動態模擬器驗證（2026-10-24）
 

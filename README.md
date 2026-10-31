@@ -1,18 +1,18 @@
 # IoT Device Integration Demo
 
-以 Python 實作的設備量測 Demo：Gateway 從模擬電表讀取 Modbus TCP 資料，透過 MQTT 傳給接收端，保存至 PostgreSQL，再由 FastAPI 提供設備、感測點與歷史查詢。
+以 Python 實作的設備採集與查詢專案。目前 Gateway 已改為 JSON 設定的多設備 Modbus TCP／RTU 採集，透過 MQTT v2 發送通用點位讀值。
+
+**本次是 Gateway 階段：Receiver、PostgreSQL 儲存與 FastAPI 仍使用既有電表 v1 契約，尚未接入 v2。啟動新版 Gateway 後，新資料可在 MQTT 觀察，但不會由舊 Receiver 入庫；API 仍可查詢既有資料。**
 
 ```text
-模擬電表 → Modbus TCP → Python Gateway → MQTT／Mosquitto → Python Receiver
-                                                               ↓
-                                                          PostgreSQL
-                                                               ↑
-                                                          FastAPI → HTTP 查詢
+appsettings.json → Gateway → SQLite 待送 → MQTT v2 → 訂閱工具觀察
+                   ↑
+         Modbus TCP／RTU 設備
+
+既有 Receiver（僅 v1）→ PostgreSQL → FastAPI（查詢舊資料）
 ```
 
-目前可採集電壓、電流、功率與累積電量，在同一交易保存一份採集快照與四筆點位值。接收端會驗證訊息、略過相同資料重送；同 ID 內容不同時記錄衝突，不覆寫原資料。查詢端可先列出設備、選擇感測點，再查看歷史，不必預先知道 ID。
-
-完整元件分工、兩段 ACK 與故障時的保存位置，見 [系統架構與可靠傳輸圖](docs/ARCHITECTURE.md)。
+Gateway 設定與支援範圍見 [設定說明](docs/gateway/CONFIGURATION.md)，v2 格式見 [點位訊息契約](docs/mqtt/POINT_TELEMETRY_V2.md)。[系統架構](docs/ARCHITECTURE.md) 區分現行 Gateway 與既有 v1 接收流程。
 
 ## 快速開始
 
@@ -22,9 +22,9 @@
 docker compose up -d --build --wait
 ```
 
-會建立共用 Python 映像，啟動 Simulator、Gateway、Receiver、FastAPI、Mosquitto 與 PostgreSQL；另依序執行一次性的 migration 與設備／點位初始化，成功後才啟動依賴它們的服務。Gateway 等 Simulator 與 Receiver 訂閱就緒後開始採集。
+會建立共用 Python 映像，啟動 Simulator、Gateway、Receiver、FastAPI、Mosquitto 與 PostgreSQL；另依序執行一次性的 migration 與設備／點位初始化，成功後才啟動依賴它們的服務。Gateway 等 Simulator 與 Broker 就緒後開始採集，使用 `config/gateway.docker.json` 掛載為容器內 `/app/appsettings.json`。
 
-開啟 [Swagger UI](http://127.0.0.1:8000/docs) 或 [全部量測](http://127.0.0.1:8000/telemetry)。首次採集完成前，歷史清單可能為空。`migrate`、`device-setup` 顯示 `Exited (0)` 是正常完成，其他六個服務持續執行。
+開啟 [Swagger UI](http://127.0.0.1:8000/docs) 或 [全部量測](http://127.0.0.1:8000/telemetry)。新版 Gateway 的 v2 資料尚未接入查詢端；歷史清單只顯示既有 v1 資料，空資料庫會維持空清單。`migrate`、`device-setup` 顯示 `Exited (0)` 是正常完成，其他六個服務持續執行。
 
 若原本已手動啟動 Simulator、Gateway、Receiver 或 API，請先停止，避免占用相同 port 或讓兩個 Receiver 共用 Client ID。既有 Compose 的 Broker／PostgreSQL 不必先刪除資料。
 
@@ -100,32 +100,41 @@ Receiver 預設以固定身分 `rx-demo-001` 建立持久訂閱；停止後重�
 
 若先前已啟動舊版 Broker，先執行 `docker compose up -d --force-recreate mosquitto`，套用持久化與 volume；這會中斷 MQTT 連線，需要重新啟動 Receiver。舊版未持久保存的資料不保證保留。
 
-### 5. 持續採集並發布（終端 C）
+### 5. 設定 Gateway 並持續採集（終端 C）
+
+先編輯專案根目錄 `appsettings.json`：`channels` 設定 TCP 或 RTU 通道，`devices` 設定設備 ID、通道、Unit ID、採集間隔與點位。預設配置對應本機模擬電表；多設備與 RTU 範例見 `config/gateway.multi-device.example.json`，其中溫濕度位址僅為示意，需依實際手冊修改。
 
 ```powershell
-.\.venv\Scripts\python.exe -m gateway.main --interval 5
+.\.venv\Scripts\python.exe -m gateway.main
 ```
 
-Gateway 立即採集一輪，每輪讀取並保存後等 5 秒再繼續，採集不重疊。量測先寫入本地 SQLite，再由獨立執行緒發布；Broker 離線時持續保存，恢復後補送。保持終端執行，按 `Ctrl+C` 停止，剩餘待送資料留到下次啟動。
+Gateway 只讀 JSON，不接受設備／Broker 命令列參數，也不從環境變數覆寫。修改設定後需重啟。相對 Outbox 路徑以設定檔所在資料夾為起點；本機與 Docker 的設定檔分開管理。
 
-`telemetry_buffered` 表示已保存本地，不代表已發布。Gateway 收到 Broker 確認後印出 `publish_acknowledged`；receiver 提交 DB 交易後印出 `telemetry_stored`，兩者使用相同 `message_id`。每輪建立新訊息，即使兩輪量測值相同也會保存為新資料。
+設備依各自間隔循序採集；同一通道不並行讀取。每個點位分別讀取，支援不連續位址、Holding／Input Register、有號／無號整數與浮點數、byte／word order、倍率與偏移。失敗點位記錄錯誤且不補零，其他成功點位仍可送出；全部失敗則不建立訊息。單一設備逾時會延後其他設備，尚無每通道平行工作。
 
-預設待送檔案為 `data/gateway-001-outbox.sqlite3`，最多 10,000 筆，滿時淘汰最舊資料並記錄筆數。重啟沿用同一檔案，不要讓兩個 Gateway 同時使用；此路徑不納入 Git。可用 `--outbox`、`--max-pending`、`--retry-interval` 調整，見 [離線補送](docs/verification/gateway-offline-buffer.md)。
+成功讀值先保存至 SQLite，再由背景執行緒發送。`telemetry_buffered` 只表示保存本地，`publish_acknowledged` 表示 Broker 已確認，均不代表 DB 入庫。Broker 離線時保留待送資料；恢復與重啟後補送原訊息、原 ID、原 Topic。佇列滿時淘汰最舊訊息並記錄，磁碟寫入失敗則停止。
+
+觀察 v2 MQTT 訊息：
+
+```powershell
+docker compose exec mosquitto mosquitto_sub -h 127.0.0.1 -t 'okgo/demo/v2/devices/+/telemetry' -q 1 -v
+```
+
+`Ctrl+C` 停止 Gateway。v2 使用獨立的 `gateway-001-v2-outbox.sqlite3`，不自動搬移舊 v1 待送資料。
 
 ### Gateway 程式分工
 
-Gateway 只保留 `python -m gateway.main` 持續採集入口；單次讀取／發布 CLI 已移除。
-
 ```text
 gateway/
-├── main.py          # 啟動入口、命令列設定、資源生命週期
-├── polling.py       # 持續採集、快照入列、喚醒補送
-├── device/          # reader.py 讀取設備；decoding.py 解碼；spec.py 暫存器規格
-├── messaging/       # telemetry.py 組裝訊息；publisher.py 發布並等待 MQTT 確認
-└── buffering/       # outbox.py 本地保存；sender.py 背景補送
+├── main.py          # 載入設定、管理資源生命週期
+├── config.py        # JSON 設定模型與驗證
+├── polling.py       # 多設備循序排程、保存訊息
+├── device/          # spec.py 點位規格；reader.py TCP/RTU 讀取；decoding.py 解碼
+├── messaging/       # telemetry.py 組裝 v2 訊息；publisher.py MQTT 確認
+└── buffering/       # outbox.py SQLite 保存；sender.py 背景補送
 ```
 
-閱讀順序：`main.py` → `polling.py` → `device/reader.py`；訊息經 `messaging/telemetry.py` 組裝後寫入 Outbox，再由背景 Sender 呼叫 Publisher 補送。單輪讀取仍是內部函式，不再提供獨立診斷入口。
+閱讀順序：`appsettings.json` → `config.py` → `main.py` → `polling.py` → `device/reader.py`。
 
 ### 6. 啟動 API 並查詢（終端 D）
 
@@ -180,13 +189,15 @@ $env:IOT_TEST_DATABASE_URL = 'postgresql+psycopg://iot_demo:iot_demo_local@127.0
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-最近一次完整本機驗證為 **139 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收及 Topic／raw 換算矛盾拒收後持續入庫驗證；本次使用新建臨時資料庫與 Broker，未使用展示資料。Linux 映像內另驗證 134 項通過、5 項恢復測試因未配置本機 Broker 而跳過，詳見 [Compose 部署驗證](docs/verification/compose-deployment.md)。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
+目前 Gateway 設定化版本的完整本機回歸為 **149 項通過，0 跳過、0 失敗**，使用獨立測試 DB/Broker，包含新的多設備與補送整合測試。Linux 測試映像另為 109 通過、40 項因未配置外部服務跳過。詳見 [本次驗證](docs/verification/gateway-device-config.md)。
+
+重構前一次完整本機驗證為 **139 個測試通過**，包含獨立 Broker 的三項 Receiver 恢復驗收及 Topic／raw 換算矛盾拒收後持續入庫驗證；本次使用新建臨時資料庫與 Broker，未使用展示資料。Linux 映像內另驗證 134 項通過、5 項恢復測試因未配置本機 Broker 而跳過，詳見 [Compose 部署驗證](docs/verification/compose-deployment.md)。恢復測試需額外設定 `IOT_RECOVERY_BROKER_PORT`，不得指向展示 Broker 的 1883。執行方式見 [Receiver 恢復驗證](docs/verification/receiver-recovery.md)。
 
 另外 7 個 migration／ORM 測試會執行升降版，必須使用新建的獨立測試庫。完整執行方式與既有套件提醒見 [migration 測試說明](docs/verification/multi-sensor-migration.md#重現完整測試)；不應在展示 DB 執行這組測試。持續模式驗證見 [Gateway 輪詢紀錄](docs/verification/gateway-polling.md)，既有完整資料流見 [切換與驗證紀錄](docs/verification/measurement-point-cutover.md)。
 
 ## 目前限制
 
-- 實際採集目前只有動態／固定模式的模擬電表，未驗證實體硬體。資料模型可表達不同的數值型感測點，但其他設備的通訊與接收模型仍需另行整合。
+- Gateway 支援設定式 Modbus TCP／RTU 數值點位，已有模擬器與 RTU 封包測試；尚未驗證實體串列硬體。Receiver 仍只接收電表 v1，尚未接入 Gateway v2。
 - Gateway 持續模式可恢復同一 SQLite 中尚未確認且未被淘汰的訊息；本地寫入失敗會停止，不保證 Gateway 停機期間未採集或主機／磁碟損毀後的資料。Receiver 沒有自動重連；Broker 失聯或 DB 寫入例外仍使 Receiver 結束。重啟後可恢復持久工作階段中的待送／未確認訊息，受 Broker 的 1,000 筆待送上限與保留狀態限制；首次訂閱之前、超量或遺失工作階段的訊息不保證補回。
 - 設備設定、欄位驗證、Topic／payload 設備 ID 及 raw／換算值一致性檢查已實作；發布者授權與 Gateway／設備對應等完整契約檢查尚未完成。
 - 目前適用本機 Demo：Broker 匿名、無 TLS，已開啟磁碟持久化但不保證逐筆同步落盤，API 未加入身分驗證。使用中的示範帳密不適用對外環境。

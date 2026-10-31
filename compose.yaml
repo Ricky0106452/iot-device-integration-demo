@@ -84,13 +84,14 @@ services:
 
   gateway:
     <<: *app
-    command: ["python", "-m", "gateway.main", "--device-host", "simulator", "--broker-host", "mosquitto", "--outbox", "/app/data/gateway-001-outbox.sqlite3"]
+    command: ["python", "-m", "gateway.main"]
     volumes:
       - gateway-data:/app/data
+      - ./config/gateway.docker.json:/app/appsettings.json:ro
     depends_on:
       simulator:
         condition: service_healthy
-      receiver:
+      mosquitto:
         condition: service_healthy
 
   api:

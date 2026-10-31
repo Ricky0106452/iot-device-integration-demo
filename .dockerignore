@@ -1,5 +1,9 @@
 # 僅傳入建置所需原始碼、測試與公開範例；不包含個人筆記、Git 或本地資料。
 *
+!appsettings.json
+!config/
+!config/gateway.docker.json
+!config/gateway.multi-device.example.json
 !requirements.txt
 !alembic.ini
 !migrations/

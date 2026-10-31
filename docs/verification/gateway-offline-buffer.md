@@ -1,5 +1,7 @@
 # Gateway 離線保存與補送
 
+> 本文保留 v1 階段的驗證紀錄。新版 Gateway 的設定與 v2 隔離待送檔案見 [設定說明](../gateway/CONFIGURATION.md)，不再使用命令列參數。
+
 日期：2026-10-24。對應 [ADR-0006](../decisions/0006-gateway-offline-buffer.md)。
 
 ## 現行流程

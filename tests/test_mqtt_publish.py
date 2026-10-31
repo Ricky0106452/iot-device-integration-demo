@@ -52,6 +52,14 @@ class MqttPublishTests(unittest.TestCase):
         publish_telemetry(self.message, topic='original/saved/topic', client=self.client, timeout=0.01)
         self.assertEqual(self.client.publish.call_args.args[0], 'original/saved/topic')
 
+    def test_v2_message_defaults_to_v2_topic_and_uses_configured_credentials(self):
+        self.message["schema_version"] = 2
+        publish_telemetry(self.message, client=self.client, timeout=0.01,
+                          username="gateway-user", password="test-password")
+        self.assertEqual(self.client.publish.call_args.args[0],
+                         "okgo/demo/v2/devices/meter-001/telemetry")
+        self.client.username_pw_set.assert_called_once_with("gateway-user", "test-password")
+
     def test_tcp_connection_failure_does_not_publish(self):
         self.client.connect.side_effect = ConnectionRefusedError("refused")
         self.assert_failure("broker_connection_failed")

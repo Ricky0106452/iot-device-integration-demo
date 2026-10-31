@@ -1,5 +1,7 @@
 # MQTT 量測契約 v1
 
+> 本文件描述既有 Receiver 的電表 v1 契約。新版設定式 Gateway 已改為 [通用點位 v2](POINT_TELEMETRY_V2.md)，不再透過以下舊 Gateway 操作產生 v1 訊息；Receiver 尚未改版。
+
 日期：2026-10-22。本文件定義電表 v1 契約，同時保留當時的分階段實作紀錄。
 
 目前 Gateway 單次／持續採集與發布、Pydantic 驗證、Topic／payload 設備身分與 raw 換算一致性、已設定設備與點位檢查、快照與四點值交易入庫、重複／衝突處理均已實作。一般操作見 [README](../../README.md#快速開始)，儲存語意見 [快照與點位映射](../storage/SNAPSHOT_POINT_MAPPING.md)。

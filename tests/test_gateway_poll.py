@@ -1,5 +1,6 @@
-"""持續採集與持久待送的整合邊界。"""
+"""多設備循序排程與真實 SQLite 入列；通訊失敗與儲存失敗採取不同處理。"""
 from contextlib import redirect_stderr, redirect_stdout
+from copy import deepcopy
 import io
 import json
 from pathlib import Path
@@ -8,113 +9,90 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from gateway.main import main
-from gateway.polling import run_polling, acquire_to_outbox
 from gateway.buffering.outbox import Outbox
+from gateway.config import GatewaySettings
+from gateway.main import main
+from gateway.polling import acquire_to_outbox, run_polling
+from gateway_test_support import settings_payload
 
 
 class GatewayPollingTests(unittest.TestCase):
-    def test_each_finished_cycle_waits_before_next_attempt(self):
-        acquire = Mock(return_value=0)
-        wait = Mock(side_effect=[None, None, KeyboardInterrupt])
-        calls = Mock()
-        calls.attach_mock(acquire, 'acquire')
-        calls.attach_mock(wait, 'wait')
-        self.assertEqual(run_polling(acquire, interval=5, wait=wait), 0)
-        self.assertEqual([call[0] for call in calls.mock_calls],
-                         ['acquire', 'wait', 'acquire', 'wait', 'acquire', 'wait'])
-        self.assertEqual([call.args for call in wait.call_args_list], [(5,), (5,), (5,)])
+    def settings(self):
+        data = settings_payload()
+        second = deepcopy(data["devices"][0])
+        second.update(device_id="meter-002", unit_id=2, interval_seconds=10)
+        data["devices"].append(second)
+        return GatewaySettings.model_validate(data)
 
-    def test_failed_cycle_still_waits_and_next_cycle_runs(self):
-        acquire = Mock(side_effect=[1, 0])
-        wait = Mock(side_effect=[None, KeyboardInterrupt])
-        self.assertEqual(run_polling(acquire, interval=2, wait=wait), 0)
-        self.assertEqual(acquire.call_count, 2)
-
-    def test_interrupt_during_acquisition_stops_without_another_cycle(self):
-        acquire = Mock(side_effect=KeyboardInterrupt)
-        wait = Mock()
-        self.assertEqual(run_polling(acquire, interval=5, wait=wait), 0)
-        wait.assert_not_called()
-
-    def test_unexpected_error_is_not_swallowed(self):
-        with self.assertRaisesRegex(RuntimeError, '程式缺陷'):
-            run_polling(Mock(side_effect=RuntimeError('程式缺陷')), interval=5)
-
-    def test_invalid_interval_is_rejected_before_acquisition(self):
-        for interval in [0, -1, float('nan'), float('inf')]:
-            with self.subTest(interval=interval), self.assertRaises(ValueError):
-                run_polling(Mock(), interval=interval)
-
-    def test_cli_reuses_device_options_and_default_interval(self):
-        with patch('gateway.main.Outbox') as box, patch('gateway.main.OutboxSender'), \
-             patch('gateway.main.acquire_to_outbox', return_value=0) as acquire, \
-             patch('gateway.main.run_polling') as poll:
-            poll.side_effect = lambda acquire, **kw: acquire()
-            self.assertEqual(main(['--device-port', '1503', '--device-id', 'meter-002']), 0)
-            args = acquire.call_args.args[0]
-            self.assertEqual(args.device_port, 1503)
-            self.assertEqual(args.device_id, 'meter-002')
-            self.assertEqual(args.retry_interval, 5)
-            self.assertEqual(poll.call_args.kwargs['interval'], 5)
-            self.assertEqual(box.call_args.kwargs['max_pending'], 10000)
-
-    def device(self, connected=True):
-        client = Mock()
-        client.connect.return_value = connected
-        response = client.read_holding_registers.return_value
-        response.isError.return_value = False
-        response.registers = [2300, 1000, 2300, 1, 4464]
-        return client
-
-    def args(self):
-        return Mock(device_host='127.0.0.1', device_port=1502, read_timeout=1,
-                    unit_id=1, device_id='meter-001', gateway_id='gateway-001', max_pending=1)
-
-    def test_acquisition_saves_new_messages_without_waiting_for_broker(self):
-        clients = [self.device(), self.device()]
+    def test_device_failure_does_not_block_other_device_and_shared_channel_is_serialized(self):
+        settings = self.settings()
         sender = Mock()
-        output = io.StringIO()
-        with TemporaryDirectory() as directory, Outbox(Path(directory) / 'box.db', max_pending=1) as box, \
-             patch('gateway.polling.ModbusTcpClient', side_effect=clients), \
-             redirect_stdout(output), redirect_stderr(io.StringIO()) as errors:
-            acquire_to_outbox(self.args(), box, sender)
-            first = box.oldest().message
-            acquire_to_outbox(self.args(), box, sender)
-            second = box.oldest().message
-            self.assertNotEqual(first['message_id'], second['message_id'])
-            self.assertEqual(first['measurement'], second['measurement'])
-            self.assertEqual(box.count(), 1)
-            discarded = [json.loads(line) for line in errors.getvalue().splitlines()
-                         if json.loads(line).get('event') == 'outbox_discarded']
-            self.assertEqual(discarded[0]['dropped_count'], 1)
-        self.assertEqual(sender.wakeup.set.call_count, 2)
-        self.assertEqual([json.loads(line)['event'] for line in output.getvalue().splitlines()],
-                         ['telemetry_buffered', 'telemetry_buffered'])
-        for client in clients:
-            client.close.assert_called_once()
-
-    def test_failed_device_acquisition_never_enqueues(self):
-        client = self.device(False)
-        box = Mock()
-        with patch('gateway.polling.ModbusTcpClient', return_value=client), redirect_stderr(io.StringIO()):
-            self.assertEqual(acquire_to_outbox(self.args(), box, Mock()), 1)
-        box.enqueue.assert_not_called()
+        now = [0.0]
+        def wait(seconds):
+            now[0] += seconds
+            if now[0] >= 11:
+                raise KeyboardInterrupt
+        sender.wait.side_effect = wait
+        client = Mock()
+        with patch("gateway.polling.acquire_to_outbox", side_effect=[1, 0, 1, 0, 0]) as acquire:
+            self.assertEqual(run_polling(settings, Mock(), sender, clock=lambda: now[0],
+                                         client_factory=Mock(return_value=client)), 0)
+        self.assertEqual([call.args[1].device_id for call in acquire.call_args_list],
+                         ["meter-001", "meter-002", "meter-001", "meter-001", "meter-002"])
+        self.assertTrue(all(call.args[2] is client for call in acquire.call_args_list))
         client.close.assert_called_once()
 
-    def test_storage_failure_is_nonzero_and_not_reported_as_buffered(self):
-        with TemporaryDirectory() as directory, patch('gateway.main.Outbox', side_effect=sqlite3.OperationalError('disk full')), \
-             redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
-            self.assertEqual(main(['--outbox', str(Path(directory) / 'box.db')]), 1)
-        self.assertEqual(output.getvalue(), '')
-        self.assertEqual(json.loads(errors.getvalue())['code'], 'outbox_storage_failed')
+    def test_cycle_interval_starts_after_acquisition_finishes(self):
+        settings = self.settings().model_copy(update={"devices": self.settings().devices[:1]})
+        now = [0.0]
+        sender = Mock()
+        def acquire(*args):
+            now[0] += 3
+        sender.wait.side_effect = KeyboardInterrupt
+        with patch("gateway.polling.acquire_to_outbox", side_effect=acquire):
+            run_polling(settings, Mock(), sender, clock=lambda: now[0], client_factory=Mock())
+        sender.wait.assert_called_once_with(5.0)
 
-    def test_cli_invalid_options_do_not_start_polling(self):
-        for options in [['--interval', '0'], ['--interval', 'nan'], ['--device-port', '0'],
-                        ['--mqtt-timeout', '6'], ['--device-id', 'INVALID'], ['--unit-id', '0'],
-                        ['--read-timeout', 'nan'], ['--broker-port', '0'], ['--max-pending', '0'],
-                        ['--retry-interval', 'nan'], ['--retry-interval', '-1'], ['--outbox', ':memory:']]:
-            with self.subTest(options=options), patch('gateway.main.run_polling') as poll:
-                with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-                    main(options)
-                poll.assert_not_called()
+    def test_unexpected_error_propagates_and_clients_close(self):
+        client = Mock()
+        with patch("gateway.polling.acquire_to_outbox", side_effect=RuntimeError("bug")), \
+             self.assertRaisesRegex(RuntimeError, "bug"):
+            run_polling(self.settings(), Mock(), Mock(), client_factory=Mock(return_value=client))
+        client.close.assert_called_once()
+
+    def test_successful_points_saved_before_waking_sender_with_new_id_each_cycle(self):
+        settings = self.settings()
+        readings = [{"code":"temperature", "unit":"degC", "value":"26.5", "acquired_at":"2026-10-31T00:00:00+00:00"}]
+        sender = Mock()
+        with TemporaryDirectory() as directory, Outbox(Path(directory) / "box.db", max_pending=1) as box, \
+             patch("gateway.polling.read_device", return_value=readings), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            def wake():
+                self.assertEqual(box.count(), 1)
+            sender.wakeup.set.side_effect = wake
+            acquire_to_outbox(settings, settings.devices[0], Mock(), box, sender)
+            first = box.oldest()
+            acquire_to_outbox(settings, settings.devices[0], Mock(), box, sender)
+            second = box.oldest()
+            self.assertNotEqual(first.message["message_id"], second.message["message_id"])
+            self.assertEqual(second.message["readings"], readings)
+            self.assertEqual(second.topic, "okgo/demo/v2/devices/meter-001/telemetry")
+            self.assertEqual(second.message["schema_version"], 2)
+        self.assertEqual(sender.wakeup.set.call_count, 2)
+
+    def test_failed_device_never_enqueues_or_wakes_sender(self):
+        box, sender = Mock(), Mock()
+        settings = self.settings()
+        with patch("gateway.polling.read_device", return_value=[]):
+            self.assertEqual(acquire_to_outbox(settings, settings.devices[0], Mock(), box, sender), 1)
+        box.enqueue.assert_not_called()
+        sender.wakeup.set.assert_not_called()
+
+    def test_storage_failure_is_not_reported_as_buffered(self):
+        settings = self.settings()
+        with patch("gateway.main.load_settings", return_value=settings), \
+             patch("gateway.main.Outbox", side_effect=sqlite3.OperationalError("disk full")), \
+             redirect_stderr(io.StringIO()) as errors, redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(), 1)
+        self.assertIn("outbox_storage_failed", errors.getvalue())
+        self.assertEqual(output.getvalue(), "")

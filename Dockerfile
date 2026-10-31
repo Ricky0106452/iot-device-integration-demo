@@ -12,6 +12,8 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY api ./api
 COPY gateway ./gateway
+COPY appsettings.json ./appsettings.json
+COPY config ./config
 COPY receiver ./receiver
 COPY simulator ./simulator
 COPY storage ./storage

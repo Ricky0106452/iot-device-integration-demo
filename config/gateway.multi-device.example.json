@@ -1,0 +1,93 @@
+{
+  "gateway_id": "gateway-001",
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "timeout_seconds": 5,
+    "topic_prefix": "okgo/demo/v2"
+  },
+  "buffer": {
+    "path": "../data/gateway-example-v2-outbox.sqlite3",
+    "max_pending": 10000,
+    "retry_interval_seconds": 5
+  },
+  "channels": [
+    {
+      "channel_id": "meter-tcp",
+      "protocol": "modbus_tcp",
+      "host": "127.0.0.1",
+      "port": 1502,
+      "timeout_seconds": 1
+    },
+    {
+      "channel_id": "serial-bus",
+      "protocol": "modbus_rtu",
+      "serial_port": "COM3",
+      "baudrate": 9600,
+      "bytesize": 8,
+      "parity": "E",
+      "stopbits": 1,
+      "timeout_seconds": 1
+    }
+  ],
+  "devices": [
+    {
+      "device_id": "meter-001",
+      "channel_id": "meter-tcp",
+      "unit_id": 1,
+      "interval_seconds": 5,
+      "points": [
+        {
+          "code": "voltage",
+          "unit": "V",
+          "address": 0,
+          "data_type": "uint16",
+          "scale": "0.1"
+        },
+        {
+          "code": "current",
+          "unit": "A",
+          "address": 1,
+          "data_type": "uint16",
+          "scale": "0.01"
+        },
+        {
+          "code": "power",
+          "unit": "W",
+          "address": 2,
+          "data_type": "uint16"
+        },
+        {
+          "code": "energy",
+          "unit": "Wh",
+          "address": 3,
+          "data_type": "uint32"
+        }
+      ]
+    },
+    {
+      "device_id": "temperature-001",
+      "channel_id": "serial-bus",
+      "unit_id": 2,
+      "interval_seconds": 10,
+      "points": [
+        {
+          "code": "temperature",
+          "unit": "degC",
+          "register_type": "input",
+          "address": 100,
+          "data_type": "int16",
+          "scale": "0.1"
+        },
+        {
+          "code": "humidity",
+          "unit": "%",
+          "register_type": "holding",
+          "address": 120,
+          "data_type": "uint16",
+          "scale": "0.1"
+        }
+      ]
+    }
+  ]
+}

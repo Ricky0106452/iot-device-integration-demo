@@ -7,7 +7,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from gateway.messaging.telemetry import build_telemetry
+from gateway_test_support import legacy_message
 from receiver.models import Telemetry
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,12 +28,12 @@ class TelemetryModelTests(unittest.TestCase):
         self.assertEqual(model.measurement.voltage_v, 230.0)
         self.assertEqual(model.model_dump(mode="json"), self.example)
 
-    def test_accepts_actual_gateway_message(self):
+    def test_accepts_legacy_v1_gateway_message(self):
         snapshot = {"status": "ok", "device_id": 1,
                     "acquired_at": "2026-10-22T09:30:44.666262+00:00",
                     "raw_registers": self.example["raw_registers"],
                     "measurement": self.example["measurement"]}
-        message = build_telemetry(snapshot, device_id="meter-001", gateway_id="gateway-001")
+        message = legacy_message(snapshot, device_id="meter-001", gateway_id="gateway-001")
         self.assertEqual(self.parse(message).model_dump(mode="json"), message)
 
     def test_rejects_values_between_device_steps(self):

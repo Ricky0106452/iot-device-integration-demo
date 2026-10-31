@@ -1,10 +1,22 @@
 # 系統架構與可靠傳輸
 
+## 目前 Gateway 階段
+
+Gateway 現在由 `appsettings.json` 設定通道、設備與點位，循序採集 Modbus TCP/RTU，將成功點位寫入獨立 v2 SQLite 再以 MQTT v2 發送。每個點位有獨立取得時間，不保證同輪是原子快照。
+
+```text
+JSON 設定 → 多設備採集 → 點位解碼 → SQLite v2 Outbox → 背景 Sender → MQTT v2
+```
+
+既有 Receiver/DB/API 仍使用 v1 電表契約，未接入 v2。下方圖示保留舊版完整入庫架構，不能作為目前新版 Gateway 已能入庫的證據。設定細節見 [Gateway 設定](gateway/CONFIGURATION.md)。
+
+## 既有 v1 接收與儲存架構
+
 預設由 Docker Compose 在單機啟動六個常駐服務：Simulator、Gateway、Mosquitto、Receiver、PostgreSQL 與 FastAPI。另有 migrate、device-setup 兩個一次性工作，依序完成資料庫升版與設備初始化；不是常駐 API。也保留主機 Python 的開發啟動方式。
 
 ## 整體架構
 
-箭頭表示資料或儲存流向。主圖採 Gateway 持續模式，單次 publish_once 診斷模式不經 SQLite。
+箭頭表示資料或儲存流向。主圖記錄舊 Gateway 持續模式；單次診斷入口已移除。
 
 ```mermaid
 flowchart LR

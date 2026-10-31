@@ -9,7 +9,8 @@ import unittest
 
 from pymodbus.client import ModbusTcpClient
 
-from gateway.device.reader import AcquisitionError, read_snapshot
+from gateway.config import DeviceSettings
+from gateway.device.reader import read_device
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,22 +55,13 @@ class TcpReadTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.stop_server()
 
-    def test_read_snapshot_from_separate_process(self):
-        result = subprocess.run(
-            [sys.executable, "-c",
-             "import json, sys; from pymodbus.client import ModbusTcpClient; "
-             "from gateway.device.reader import read_snapshot; "
-             "print(json.dumps(read_snapshot(ModbusTcpClient('127.0.0.1', "
-             "port=int(sys.argv[1]), timeout=1, retries=0), device_id=1)))", str(self.port)],
-            cwd=ROOT, capture_output=True, text=True, timeout=5,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["raw_registers"], [2300, 1000, 2300, 1, 4464])
-        self.assertEqual(payload["measurement"], {
-            "voltage_v": 230.0, "current_a": 10.0, "power_w": 2300, "energy_wh": 70000,
-        })
-        self.assertTrue(payload["acquired_at"].endswith("+00:00"))
+    def test_reads_configured_points_from_separate_simulator_process(self):
+        data = json.loads((ROOT / "appsettings.json").read_text(encoding="utf-8"))
+        device = DeviceSettings.model_validate(data["devices"][0])
+        client = ModbusTcpClient("127.0.0.1", port=self.port, timeout=1, retries=0)
+        readings = read_device(client, device)
+        self.assertEqual([r["value"] for r in readings], ["230.0", "10.00", "2300", "70000"])
+        self.assertTrue(all(r["acquired_at"].endswith("+00:00") for r in readings))
 
     def test_undefined_address_and_writes_are_rejected(self):
         client = ModbusTcpClient("127.0.0.1", port=self.port, timeout=1, retries=0)
@@ -88,6 +80,6 @@ class TcpReadTests(unittest.TestCase):
             endpoint.bind(("127.0.0.1", 0))
             port = endpoint.getsockname()[1]
             client = ModbusTcpClient("127.0.0.1", port=port, timeout=0.2, retries=0)
-            with self.assertRaises(AcquisitionError) as raised:
-                read_snapshot(client, device_id=1)
-        self.assertEqual(raised.exception.code, "connection_failed")
+            data = json.loads((ROOT / "appsettings.json").read_text(encoding="utf-8"))
+            device = DeviceSettings.model_validate(data["devices"][0])
+            self.assertEqual(read_device(client, device), [])

@@ -17,6 +17,7 @@ class PublishError(Exception):
 
 def publish_telemetry(
     message: dict, *, topic=None, host="127.0.0.1", port=1883, timeout=5.0, client=None,
+    username=None, password=None,
 ) -> None:
     """只在收到 QoS 1 確認後正常返回；傳入的 client 也會在結束時關閉。
 
@@ -27,7 +28,7 @@ def publish_telemetry(
         raise ValueError("MQTT 等待秒數必須大於 0 且不超過 5")
     payload = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if topic is None:
-        topic = f"okgo/demo/v1/devices/{message['device_id']}/telemetry"
+        topic = f"okgo/demo/v{message['schema_version']}/devices/{message['device_id']}/telemetry"
     if client is None:
         client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -35,6 +36,8 @@ def publish_telemetry(
             clean_session=True, protocol=mqtt.MQTTv311,
             reconnect_on_failure=False,
         )
+    if username is not None:
+        client.username_pw_set(username, password)
     client.connect_timeout = timeout
     connected = Event()
     connection_rejected = False
