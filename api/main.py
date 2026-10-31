@@ -19,7 +19,6 @@ def get_session(request: Request):
         yield session
 
 
-
 def create_app(*, database_url: str | None = None) -> FastAPI:
     """建立應用；啟動時建立 engine，結束時釋放連線池。"""
     @asynccontextmanager
@@ -33,16 +32,6 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
             app.state.engine.dispose()
 
     app = FastAPI(title="IoT Telemetry API", lifespan=lifespan)
-
-    @app.get("/devices/{device_id}/telemetry/latest", deprecated=True,
-             responses={410:{"description":"固定電表快照已退場，請改用點位歷史"}})
-    def latest_telemetry(device_id: str):
-        raise HTTPException(status_code=410, detail="Snapshot API retired; use /points/{point_id}/readings")
-
-    @app.get("/telemetry", deprecated=True,
-             responses={410:{"description":"固定電表快照已退場，請改用點位歷史"}})
-    def history_telemetry():
-        raise HTTPException(status_code=410, detail="Snapshot API retired; use /points/{point_id}/readings")
 
     @app.get("/devices", response_model=list[DeviceResponse])
     def list_devices(

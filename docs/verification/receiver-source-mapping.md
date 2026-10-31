@@ -1,5 +1,7 @@
 # Receiver 來源映射與統一讀值驗證
 
+> 後續路由清理：兩個快照接口已直接移除，Swagger 不再列出，原路徑回標準 404；下方 410 驗證為先前階段紀錄。此修改另由路由/OpenAPI 測試驗證。2026-10-31 已以目前版本建立獨立 Compose 專案 okgo-clean-check-1793435663695，使用全新容器、空資料庫與 volumes，驗證 migration 0003、Modbus → Gateway → MQTT → Receiver → PostgreSQL → API 的實際資料流程，以及三條現行 OpenAPI 路徑與兩條舊路徑的 404。新測試容器內完整執行 179 項測試，23.249 秒，全部通過且沒有跳過。測試環境已清除；原展示環境未改動。此為同一 Docker 主機上的隔離部署驗證，建置沿用可用的映像層快取，並非全新 VM。
+
 日期：2026-10-31。分支 `codex/gateway-device-config`，Gateway 基準 commit `f2d0814`。
 
 本版已修正先前保留固定快照與另開讀值表的設計：移除 telemetry_readings，不建立 mapped_point_readings，歷史與新映射讀值統一使用 readings。收據不保存整包 payload 或重複值。

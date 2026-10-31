@@ -2,7 +2,7 @@
 
 以 Python 實作的設備採集與查詢專案。目前 Gateway 已改為 JSON 設定的多設備 Modbus TCP／RTU 採集，透過 MQTT v2 發送通用點位讀值。
 
-**目前已接通 Gateway v2 → Receiver 來源映射 → PostgreSQL。Receiver 使用自己的平台點位與綁定設定，不讀 Gateway 設定；新舊點位值統一保存至 readings，不再保存固定電表快照。點位歷史 API 維持原格式並可查 v2；兩個舊快照接口回 410 Gone。**
+**目前已接通 Gateway v2 → Receiver 來源映射 → PostgreSQL。Receiver 使用自己的平台點位與綁定設定，不讀 Gateway 設定；新舊點位值統一保存至 readings，不再保存固定電表快照。點位歷史 API 維持原格式並可查 v2；兩個舊快照接口已直接移除。**
 
 ```text
 appsettings.json → Gateway → SQLite 待送 → MQTT v2
@@ -165,10 +165,8 @@ docker compose down
 | `GET /devices` | 列出已設定的設備 |
 | `GET /devices/{device_id}/points` | 列出該設備的點位、名稱、單位與解析度 |
 | `GET /points/{point_id}/readings` | 查單一點位的歷史值 |
-| `GET /telemetry` | 已退場，回 410 Gone |
-| `GET /devices/{device_id}/telemetry/latest` | 已退場，回 410 Gone |
 
-清單與歷史查詢支援 `limit`、`offset`，預設 100 筆、每次最多 1000 筆。例如 `/telemetry?limit=100&offset=100` 取得下一頁。歷史量測依 `acquired_at` 由新到舊排序。
+清單與歷史查詢支援 `limit`、`offset`，預設 100 筆、每次最多 1000 筆。例如 `/points/{point_id}/readings?limit=100&offset=100` 取得下一頁。歷史量測依 `acquired_at` 由新到舊排序。
 
 點位 API 的 `value`、`resolution` 使用十進位字串，例如 `"230.1"`、`"0.1"`。固定電表快照 API 已退場。點位回應與錯誤規則見 [點位 API](docs/api/POINT_READINGS.md)；舊快照文件僅保留為歷史紀錄。
 

@@ -35,6 +35,6 @@ PostgreSQL 只有平台設備、點位、來源映射、最小訊息收據與統
 
 ## API 範圍
 
-設備、點位與點位歷史維持原回應格式；點位歷史可查遷移的舊值與新 v2 值。兩個固定電表快照接口回 410 Gone，避免查不存在的資料表。本階段沒有新增查詢功能或前端。
+設備、點位與點位歷史維持原回應格式；點位歷史可查遷移的舊值與新 v2 值。兩個固定電表快照接口已移除，不出現在 Swagger；原路徑回標準 404。本階段沒有新增查詢功能或前端。
 
 [Gateway 設定](gateway/CONFIGURATION.md)、[Receiver 來源映射](receiver/SOURCE_MAPPING.md)、[資料結構](storage/SCHEMA.md)。

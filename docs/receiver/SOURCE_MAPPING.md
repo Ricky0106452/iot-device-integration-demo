@@ -93,7 +93,7 @@ v2 訊息使用獨立接收模型，不匯入 Gateway 類別。檢查版本、UU
 
 歷史量測值保留；原始暫存器、完整快照與 source_data 不再保存。升版前若需保留這些診斷資訊，必須先備份。存在資料或來源綁定時拒絕退回需要快照的舊 schema，因為不能由指紋還原原始內容。
 
-API 只做必要相容處理：設備/點位清單與點位歷史保持原回應格式，點位歷史直接讀統一 readings，因此也能查到 v2。原 `/telemetry` 與 `/devices/{device_id}/telemetry/latest` 回 410 Gone 並標示 deprecated，不保留假快照或查不存在的表。
+API 只做必要相容處理：設備/點位清單與點位歷史保持原回應格式，點位歷史直接讀統一 readings，因此也能查到 v2。原 `/telemetry` 與 `/devices/{device_id}/telemetry/latest` 已直接移除、不出現在 Swagger，原路徑回標準 404，不保留假快照或查不存在的表。
 
 來源 message_id 只在其來源範圍內唯一，跨來源可能重複；API 排序加入 receipt_id 作為最後決勝條件。本階段不擴充點位 API 的欄位。
 
