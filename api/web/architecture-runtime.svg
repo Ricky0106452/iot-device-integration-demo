@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 710" role="img" aria-labelledby="title desc"><title id="title">線上系統資料流</title><desc id="desc">單台 AWS EC2 內的 Simulator、Gateway、MQTT、Receiver、PostgreSQL、FastAPI 與 Caddy。瀏覽器以 HTTPS 查詢。</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#43847d"/></marker></defs><style>text{font-family:system-ui,sans-serif;fill:#182d40}.heading{font-size:17px;font-weight:650}.detail{font-size:14px;fill:#526879}.group{font-size:15px;font-weight:650;fill:#42736d}.edge{font-size:13px;fill:#526879}</style>
+<rect x="20" y="120" width="960" height="570" rx="16" fill="#f7fafb" stroke="#b9cbd5" stroke-dasharray="7 5"/><text x="45" y="153" class="group">AWS EC2（雪梨） · Docker Compose</text>
+<path d="M800 85V200" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="852" y="106" text-anchor="middle" class="edge">HTTPS · 443</text>
+<path d="M180 280V330" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="235" y="312" text-anchor="middle" class="edge">Modbus TCP</text>
+<path d="M300 415H355" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="328" y="397" text-anchor="middle" class="edge">QoS 1</text>
+<path d="M475 450V550" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="522" y="510" text-anchor="middle" class="edge">訂閱訊息</text>
+<path d="M595 597H650" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M800 280V350" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="850" y="320" text-anchor="middle" class="edge">反向代理</text>
+<path d="M800 430V520" fill="none" stroke="#43847d" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="850" y="480" text-anchor="middle" class="edge">唯讀查詢</text>
+<rect x="650" y="15" width="300" height="70" rx="12" fill="#eaf6f2" stroke="#b9d3cf"/>
+<text x="800.0" y="44" text-anchor="middle" class="heading">瀏覽器</text>
+<text x="800.0" y="68" text-anchor="middle" class="detail">量測展示頁／Swagger</text>
+<rect x="60" y="200" width="240" height="80" rx="12" fill="white" stroke="#b9d3cf"/>
+<text x="180.0" y="229" text-anchor="middle" class="heading">Simulator</text>
+<text x="180.0" y="253" text-anchor="middle" class="detail">每 5 秒更新模擬電表</text>
+<rect x="60" y="330" width="240" height="170" rx="12" fill="#eaf6f2" stroke="#b9d3cf"/>
+<text x="180.0" y="359" text-anchor="middle" class="heading">Gateway</text>
+<text x="180.0" y="383" text-anchor="middle" class="detail">持續採集與解碼</text>
+<text x="180.0" y="405" text-anchor="middle" class="detail">↓ SQLite 待送佇列</text>
+<text x="180.0" y="427" text-anchor="middle" class="detail">↓ 背景 Sender</text>
+<text x="180.0" y="449" text-anchor="middle" class="detail">PUBACK 後移除待送</text>
+<rect x="355" y="350" width="240" height="100" rx="12" fill="white" stroke="#b9d3cf"/>
+<text x="475.0" y="379" text-anchor="middle" class="heading">Mosquitto</text>
+<text x="475.0" y="403" text-anchor="middle" class="detail">持久工作階段與待送訊息</text>
+<text x="475.0" y="425" text-anchor="middle" class="detail">mosquitto-data volume</text>
+<rect x="355" y="550" width="240" height="95" rx="12" fill="#eaf6f2" stroke="#b9d3cf"/>
+<text x="475.0" y="579" text-anchor="middle" class="heading">Receiver</text>
+<text x="475.0" y="603" text-anchor="middle" class="detail">驗證、映射、去重</text>
+<text x="475.0" y="625" text-anchor="middle" class="detail">DB 提交後才 ACK</text>
+<rect x="650" y="520" width="300" height="125" rx="12" fill="white" stroke="#b9d3cf"/>
+<text x="800.0" y="549" text-anchor="middle" class="heading">PostgreSQL</text>
+<text x="800.0" y="573" text-anchor="middle" class="detail">設備、點位、來源綁定</text>
+<text x="800.0" y="595" text-anchor="middle" class="detail">最小收據＋量測歷史</text>
+<text x="800.0" y="617" text-anchor="middle" class="detail">postgres-data volume</text>
+<rect x="650" y="350" width="300" height="80" rx="12" fill="white" stroke="#b9d3cf"/>
+<text x="800.0" y="379" text-anchor="middle" class="heading">FastAPI</text>
+<text x="800.0" y="403" text-anchor="middle" class="detail">靜態展示頁＋只讀 API</text>
+<rect x="650" y="200" width="300" height="80" rx="12" fill="white" stroke="#b9d3cf"/>
+<text x="800.0" y="229" text-anchor="middle" class="heading">Caddy</text>
+<text x="800.0" y="253" text-anchor="middle" class="detail">HTTPS 憑證與公開入口</text>
+<text x="180" y="525" text-anchor="middle" class="edge">SQLite：gateway-data volume</text></svg>

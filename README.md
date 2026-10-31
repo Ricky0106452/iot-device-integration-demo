@@ -14,11 +14,11 @@ appsettings.json → Gateway → SQLite 待送 → MQTT v2
 readings → FastAPI 點位歷史（包含舊資料與 v2）
 ```
 
-Gateway 設定與支援範圍見 [設定說明](docs/gateway/CONFIGURATION.md)，v2 格式見 [點位訊息契約](docs/mqtt/POINT_TELEMETRY_V2.md)。[系統架構](docs/ARCHITECTURE.md) 區分現行來源映射與既有 v1 查詢流程。Receiver 設定見 [來源映射說明](docs/receiver/SOURCE_MAPPING.md)。
+Gateway 設定與支援範圍見 [設定說明](docs/gateway/CONFIGURATION.md)，v2 格式見 [點位訊息契約](docs/mqtt/POINT_TELEMETRY_V2.md)。[系統架構](docs/ARCHITECTURE.md) 說明資料流、單主機雲端部署與 CI/CD。Receiver 設定見 [來源映射說明](docs/receiver/SOURCE_MAPPING.md)。
 
 ## 線上展示
 
-[開啟量測展示頁](https://16-176-3-35.sslip.io/) · [API 文件](https://16-176-3-35.sslip.io/docs)
+[開啟量測展示頁](https://16-176-3-35.sslip.io/) · [架構圖展示](https://16-176-3-35.sslip.io/assets/architecture.html) · [API 文件](https://16-176-3-35.sslip.io/docs)
 
 雲端獨立執行模擬採集，無須啟動本機服務。部署方式與操作限制見 [雲端部署](deploy/README.md)。
 

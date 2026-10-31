@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>系統架構｜IoT 量測觀測</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body><main>
+<header><div><p class="eyebrow">IoT DEVICE INTEGRATION</p><h1>系統架構</h1><p>從設備採集到網頁查詢，以及版本如何自動部署。</p></div><nav aria-label="主要導覽"><a href="/">回到量測</a><a href="/docs">API 文件 ↗</a></nav></header>
+<section class="history architecture-section" aria-labelledby="runtime-title">
+<h2 id="runtime-title">01 · 系統資料流</h2>
+<p>整套展示在一台 AWS EC2 執行。模擬電表持續更新數值，Gateway 主動採集；瀏覽器只查詢已入庫資料。</p>
+<figure><div class="diagram-scroll" tabindex="0" aria-label="系統資料流架構圖，小螢幕可橫向捲動"><img src="/assets/architecture-runtime.svg" alt="Simulator 經 Gateway 的 SQLite 待送佇列發布 MQTT，Receiver 寫入 PostgreSQL；瀏覽器透過 Caddy 與 FastAPI 查詢。"></div><figcaption>小螢幕可左右滑動查看完整圖。Gateway 的 PUBACK 是 Broker 確認；Receiver 在 DB 提交後才確認訊息。</figcaption></figure>
+<div class="architecture-notes"><article><h3>採集與平台各自設定</h3><p>來源 meter-001 的四個點位，映射成平台「展示電表（site-001）」的感測點。Gateway 不負責平台資料命名。</p></article><article><h3>中斷後保存與補送</h3><p>Gateway 以 SQLite 保存待送資料；Broker 保留持久訂閱與待送狀態。兩者都有容量與保存限制，不代表主機故障時保證零遺失。</p></article></div>
+</section>
+<section class="history architecture-section" aria-labelledby="delivery-title">
+<h2 id="delivery-title">02 · CI/CD 自動部署</h2>
+<p>PR 只執行測試。main 更新且測試通過後，EC2 主動拉取可部署版本，GitHub 最後確認線上結果。</p>
+<figure><div class="diagram-scroll" tabindex="0" aria-label="CI/CD 架構圖，小螢幕可橫向捲動"><img src="/assets/architecture-delivery.svg" alt="GitHub CI 通過後更新部署指標，EC2 每分鐘拉取，建置、備份 DB、執行 migration 並更新服務，成功後由 GitHub 透過 HTTPS 驗證。"></div><figcaption>沒有在正式主機安裝通用 GitHub Runner，也不需要 GitHub 透過 SSH 連入。</figcaption></figure>
+<p class="hint">目前是單主機部署；更新期間可能短暫中斷，沒有跨主機容錯、零停機或資料庫自動回滾保證。</p>
+</section>
+<footer><a href="https://github.com/Ricky0106452/iot-device-integration-demo/blob/main/docs/ARCHITECTURE.md">完整架構文件 ↗</a> · <a href="https://github.com/Ricky0106452/iot-device-integration-demo/actions">CI/CD 執行紀錄 ↗</a></footer>
+</main></body></html>
