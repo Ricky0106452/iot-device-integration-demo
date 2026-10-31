@@ -9,7 +9,7 @@
   "platform_devices": [
     {
       "device_id": "site-001",
-      "name": "展示場域",
+      "name": "展示電表",
       "points": [
         {
           "code": "supply-voltage",

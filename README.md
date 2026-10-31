@@ -16,6 +16,16 @@ readings → FastAPI 點位歷史（包含舊資料與 v2）
 
 Gateway 設定與支援範圍見 [設定說明](docs/gateway/CONFIGURATION.md)，v2 格式見 [點位訊息契約](docs/mqtt/POINT_TELEMETRY_V2.md)。[系統架構](docs/ARCHITECTURE.md) 區分現行來源映射與既有 v1 查詢流程。Receiver 設定見 [來源映射說明](docs/receiver/SOURCE_MAPPING.md)。
 
+## 線上展示
+
+[開啟量測展示頁](https://16-176-3-35.sslip.io/) · [API 文件](https://16-176-3-35.sslip.io/docs)
+
+雲端獨立執行模擬採集，無須啟動本機服務。部署方式與操作限制見 [雲端部署](deploy/README.md)。
+
+## CI/CD
+
+PR 會自動執行完整測試；main 更新且測試通過後，雲端主機會拉取該版本、備份 DB、執行 migration 並更新服務。GitHub 會再確認線上版本與量測持續更新。部署期間可能短暫中斷，操作方式見 [部署說明](deploy/README.md#cicd)。
+
 ## 快速開始
 
 需要 Docker Engine 與 Docker Compose，使用 Linux containers。在專案根目錄執行：
@@ -24,9 +34,11 @@ Gateway 設定與支援範圍見 [設定說明](docs/gateway/CONFIGURATION.md)�
 docker compose up -d --build --wait
 ```
 
-會建立共用 Python 映像，啟動 Simulator、Gateway、Receiver、FastAPI、Mosquitto 與 PostgreSQL；另依序執行一次性的 migration 與設備／點位初始化，成功後才啟動依賴它們的服務。Gateway 等 Simulator 與 Receiver 完成訂閱後開始採集，使用 `config/gateway.docker.json` 掛載為容器內 `/app/appsettings.json`。
+會建立共用 Python 映像，啟動 Simulator、Gateway、Receiver、FastAPI、Mosquitto 與 PostgreSQL；另執行一次性的 migration；Receiver 啟動時依自己的設定建立平台設備、點位與來源綁定。Gateway 等 Simulator 與 Receiver 完成訂閱後開始採集，使用 `config/gateway.docker.json` 掛載為容器內 `/app/appsettings.json`。
 
-開啟 [Swagger UI](http://127.0.0.1:8000/docs) 或 [設備清單](http://127.0.0.1:8000/devices)，依序選設備、點位與歷史。新舊值均保存至 readings；固定快照 API 已退場。`migrate`、`device-setup` 顯示 `Exited (0)` 是正常完成，其他六個服務持續執行。
+開啟 [量測展示頁](http://127.0.0.1:8000/)：選擇設備查看各感測點最新值，並選取點位查看最近 100 筆趨勢與明細。頁面每 5 秒讀取既有 API，顯示的是已入庫資料；查詢成功不代表採集鏈路正常。圖表以採集時間排列，卡片與明細保留 API 的十進位字串；圖形位置以瀏覽器數值近似計算。
+
+也可開啟 [Swagger UI](http://127.0.0.1:8000/docs) 或 [設備清單](http://127.0.0.1:8000/devices)，依序選設備、點位與歷史。新舊值均保存至 readings；固定快照 API 已退場。`migrate` 顯示 `Exited (0)` 是正常完成，其他六個服務持續執行。
 
 若原本已手動啟動 Simulator、Gateway、Receiver 或 API，請先停止，避免占用相同 port 或讓兩個 Receiver 共用 Client ID。既有 Compose 的 Broker／PostgreSQL 不必先刪除資料。
 
@@ -60,10 +72,9 @@ python -m venv .venv
 ```powershell
 docker compose up -d --wait mosquitto postgres
 .\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m storage.device_setup --device-id meter-001
 ```
 
-初始化會建立供既有 v1 流程使用的 `meter-001` 與四個電表點位；新版 Receiver 依自己的 receiver.appsettings.json 初始化平台點位及來源綁定，無須與 Gateway 同名。兩種流程均須先完成 migration。
+Receiver 依自己的 receiver.appsettings.json 初始化平台設備、點位及來源綁定，無須與 Gateway 來源設備同名。啟動 Receiver 前須先完成 migration；目前不再執行舊版電表初始化。
 
 預設連線位置：
 

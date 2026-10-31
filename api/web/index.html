@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoT 量測觀測</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script src="/assets/app.js" defer></script>
+</head>
+<body>
+<main>
+<header><div><p class="eyebrow">IoT DEVICE INTEGRATION</p><h1>量測觀測</h1><p>設備採集 → MQTT → 入庫 → API 查詢</p></div><a href="/docs">API 文件 ↗</a></header>
+<section class="toolbar" aria-label="查詢控制">
+<label>設備<select id="device" disabled><option>載入中…</option></select></label>
+<button id="refresh" type="button">重新整理</button>
+<p id="status" role="status" aria-live="polite">正在取得設備清單…</p>
+</section>
+<p class="hint">每 5 秒查詢一次。時間以瀏覽器當地時區顯示；量測時間來自設備採集，不代表頁面更新時間。</p>
+<p id="error" role="alert" hidden></p>
+<section aria-labelledby="latest-title"><h2 id="latest-title">各感測點最新量測</h2><div id="cards" class="cards"></div></section>
+<section class="history" aria-labelledby="history-title">
+<div class="history-heading"><div><h2 id="history-title">歷史趨勢</h2><p id="range">選擇感測點查看最近 100 筆量測。</p></div><label>感測點<select id="point" disabled></select></label></div>
+<div id="chart"></div>
+<details><summary>查看量測資料</summary><div class="table-scroll"><table><thead><tr><th>採集時間</th><th>量測值</th><th>接收時間</th></tr></thead><tbody id="readings"></tbody></table></div></details>
+</section>
+<footer>頁面只讀取已入庫資料。沒有新量測時，需配合 Gateway、Broker 與 Receiver 日誌判斷原因。</footer>
+</main>
+</body></html>

@@ -48,14 +48,6 @@ services:
       postgres:
         condition: service_healthy
 
-  device-setup:
-    <<: *app
-    environment: *database-env
-    command: ["python", "-m", "storage.device_setup", "--device-id", "meter-001"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-
   simulator:
     <<: *app
     command: ["python", "-m", "simulator.server", "--host", "0.0.0.0"]
@@ -102,7 +94,7 @@ services:
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
-      device-setup:
+      migrate:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/devices', timeout=2).close()"]

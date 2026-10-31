@@ -1,10 +1,13 @@
 """量測查詢；只讀 DB，不啟動 MQTT 或執行 migration。"""
 from contextlib import asynccontextmanager
 import os
+from pathlib import Path as FilePath
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
 from api.models import (DeviceResponse, PointHistoryResponse, PointResponse)
@@ -32,6 +35,14 @@ def create_app(*, database_url: str | None = None) -> FastAPI:
             app.state.engine.dispose()
 
     app = FastAPI(title="IoT Telemetry API", lifespan=lifespan)
+
+    # 靜態展示頁只讀既有 API，不啟動採集或修改資料。
+    web_directory = FilePath(__file__).resolve().parent / "web"
+    app.mount("/assets", StaticFiles(directory=web_directory), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    def dashboard():
+        return FileResponse(web_directory / "index.html")
 
     @app.get("/devices", response_model=list[DeviceResponse])
     def list_devices(

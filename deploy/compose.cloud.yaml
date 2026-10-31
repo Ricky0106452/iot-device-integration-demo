@@ -1,0 +1,51 @@
+# 與根目錄 compose.yaml 合併；本機預設部署不受影響。
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  postgres:
+    <<: *runtime
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?請先設定雲端資料庫密碼}
+  mosquitto:
+    <<: *runtime
+  simulator:
+    <<: *runtime
+  gateway:
+    <<: *runtime
+  receiver:
+    <<: *runtime
+    volumes:
+      - ./data/receiver.cloud.json:/app/receiver.appsettings.json:ro
+  migrate:
+    environment:
+      DATABASE_URL: postgresql+psycopg://iot_demo:${POSTGRES_PASSWORD:?請先設定雲端資料庫密碼}@postgres:5432/iot_demo
+  api:
+    <<: *runtime
+    environment:
+      DATABASE_URL: postgresql+psycopg://iot_demo:${POSTGRES_PASSWORD:?請先設定雲端資料庫密碼}@postgres:5432/iot_demo
+  web:
+    <<: *runtime
+    image: caddy:2-alpine
+    environment:
+      DEMO_DOMAIN: ${DEMO_DOMAIN:?請先設定公開網域}
+    ports:
+      - "${WEB_HTTP_PORT:-80}:80"
+      - "${WEB_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/deployment:/srv/deployment:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
+  caddy-config:

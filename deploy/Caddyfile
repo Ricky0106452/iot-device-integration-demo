@@ -1,0 +1,11 @@
+{$DEMO_DOMAIN} {
+    encode gzip
+    handle /deployment.json {
+        root * /srv/deployment
+        header Cache-Control "no-store"
+        file_server
+    }
+    handle {
+        reverse_proxy api:8000
+    }
+}

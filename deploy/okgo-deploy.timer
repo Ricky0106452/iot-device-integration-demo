@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for a CI-approved release every minute
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+Unit=okgo-deploy.service
+
+[Install]
+WantedBy=timers.target
