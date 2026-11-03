@@ -1,5 +1,7 @@
 # IoT Device Integration Demo
 
+[線上 Demo](https://16-176-3-35.sslip.io/)：查看模擬設備的最新量測與歷史趨勢。
+
 以 Python 實作的設備採集與查詢專案。目前 Gateway 已改為 JSON 設定的多設備 Modbus TCP／RTU 採集，透過 MQTT v2 發送通用點位讀值。
 
 **目前已接通 Gateway v2 → Receiver 來源映射 → PostgreSQL。Receiver 使用自己的平台點位與綁定設定，不讀 Gateway 設定；新舊點位值統一保存至 readings，不再保存固定電表快照。點位歷史 API 維持原格式並可查 v2；兩個舊快照接口已直接移除。**
